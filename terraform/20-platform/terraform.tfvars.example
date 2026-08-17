@@ -1,0 +1,29 @@
+# cp terraform.tfvars.example terraform.tfvars  and fill in.
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+prefix          = "alzlab"
+location        = "australiaeast"
+
+# ---------------------------------------------------------------------------
+# Cost toggles. Everything below bills by the hour while it exists.
+# Baseline (all false except the VM) is roughly A$20-25/month.
+# ---------------------------------------------------------------------------
+
+# Day 1-2: everything off except the VM. Build the topology, wire the private
+# endpoint, prove DNS resolution. Costs almost nothing.
+enable_firewall         = false
+enable_vpn_gateway      = false
+enable_simulated_onprem = false
+enable_test_vm          = true
+
+# Day 3 (one afternoon): turn the firewall on, watch the effective routes
+# change, break egress on purpose, read the logs in KQL, then turn it back off.
+#   enable_firewall   = true
+#   firewall_sku_tier = "Standard"   # or "Basic" to save ~2/3 of the cost
+
+# Day 4 (one afternoon): hybrid connectivity. Both gateways take ~40 min to
+# build, so start the apply and go do the reading.
+#   enable_vpn_gateway      = true
+#   enable_simulated_onprem = true
+
+log_retention_days = 30

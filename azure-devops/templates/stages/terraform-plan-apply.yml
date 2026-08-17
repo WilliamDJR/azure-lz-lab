@@ -1,0 +1,185 @@
+# ============================================================================
+# PLATFORM TEMPLATE - owned by the platform team, consumed via `extends`
+#
+# Equivalent GitHub Actions concept: a reusable workflow. The difference is
+# that a reusable workflow is something the caller *invokes* alongside its own
+# jobs, whereas an extends template *is* the caller's entire pipeline. Combine
+# this with a "template check" on the production service connection and you
+# have a hard guarantee: nothing reaches production except through this file.
+# ============================================================================
+
+parameters:
+  - name: serviceConnection
+    type: string
+  - name: workingDirectory
+    type: string
+  - name: environmentName
+    type: string
+  - name: terraformVersion
+    type: string
+    default: 1.9.8
+  - name: applyOnBranch
+    type: string
+    default: refs/heads/main
+  # An allow-list parameter. Consumers pick from these; they cannot invent a
+  # value. This is how you constrain self-service without blocking it.
+  - name: poolName
+    type: string
+    default: ubuntu-latest
+    values:
+      - ubuntu-latest
+      - self-hosted-linux
+
+variables:
+  # Project-level shared variables, optionally backed by Key Vault.
+  # GitHub Actions equivalent: organisation/repo secrets, but a variable group
+  # is a first-class object you can reuse across pipelines and audit centrally.
+  - group: platform-common
+
+stages:
+  # --------------------------------------------------------------------------
+  # Stage 1: validate. Cheap, always runs, fails fast.
+  # --------------------------------------------------------------------------
+  - stage: Validate
+    displayName: Validate
+    jobs:
+      - job: fmt_validate
+        displayName: fmt, validate, security scan
+        pool:
+          vmImage: ${{ parameters.poolName }}
+        steps:
+          - template: ../steps/terraform-setup.yml
+            parameters:
+              terraformVersion: ${{ parameters.terraformVersion }}
+
+          - script: terraform fmt -check -recursive
+            displayName: terraform fmt -check
+            workingDirectory: ${{ parameters.workingDirectory }}
+
+          - task: AzureCLI@2
+            displayName: terraform init + validate
+            inputs:
+              azureSubscription: ${{ parameters.serviceConnection }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              workingDirectory: ${{ parameters.workingDirectory }}
+              # addSpnToEnvironment surfaces the federated credential as
+              # ARM_* environment variables so Terraform authenticates with no
+              # secret anywhere in the pipeline.
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export ARM_USE_OIDC=true
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_OIDC_TOKEN="$idToken"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                terraform init -input=false
+                terraform validate
+
+          # The platform team injects this. A consuming pipeline has no way to
+          # remove it, because it does not control the stage list.
+          - script: |
+              set -euo pipefail
+              curl -sSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+              trivy config --exit-code 1 --severity HIGH,CRITICAL .
+            displayName: IaC security scan (mandatory)
+            workingDirectory: ${{ parameters.workingDirectory }}
+
+  # --------------------------------------------------------------------------
+  # Stage 2: plan. Publishes the plan file as an artifact so that apply runs
+  # EXACTLY what was reviewed - never a re-plan.
+  # --------------------------------------------------------------------------
+  - stage: Plan
+    displayName: Plan
+    dependsOn: Validate
+    jobs:
+      - job: plan
+        displayName: terraform plan
+        pool:
+          vmImage: ${{ parameters.poolName }}
+        steps:
+          - template: ../steps/terraform-setup.yml
+            parameters:
+              terraformVersion: ${{ parameters.terraformVersion }}
+
+          - task: AzureCLI@2
+            displayName: terraform plan
+            inputs:
+              azureSubscription: ${{ parameters.serviceConnection }}
+              scriptType: bash
+              scriptLocation: inlineScript
+              workingDirectory: ${{ parameters.workingDirectory }}
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export ARM_USE_OIDC=true
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_OIDC_TOKEN="$idToken"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                terraform init -input=false
+                terraform plan -input=false -out=tfplan
+                terraform show -no-color tfplan > tfplan.txt
+
+          - publish: ${{ parameters.workingDirectory }}/tfplan
+            artifact: tfplan
+            displayName: publish plan
+
+          - publish: ${{ parameters.workingDirectory }}/tfplan.txt
+            artifact: tfplan-human
+            displayName: publish readable plan
+
+  # --------------------------------------------------------------------------
+  # Stage 3: apply. A DEPLOYMENT job against an environment, which is where
+  # approvals and checks are enforced. This is the Azure DevOps equivalent of
+  # GitHub Actions environments with required reviewers - but the check types
+  # are richer: business hours windows, Azure Monitor alert state, REST calls,
+  # and template checks.
+  # --------------------------------------------------------------------------
+  - stage: Apply
+    displayName: Apply
+    dependsOn: Plan
+    condition: >-
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], '${{ parameters.applyOnBranch }}'),
+        ne(variables['Build.Reason'], 'PullRequest')
+      )
+    jobs:
+      - deployment: apply
+        displayName: terraform apply
+        environment: ${{ parameters.environmentName }}
+        pool:
+          vmImage: ${{ parameters.poolName }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - template: ../steps/terraform-setup.yml
+                  parameters:
+                    terraformVersion: ${{ parameters.terraformVersion }}
+
+                - download: current
+                  artifact: tfplan
+
+                - task: AzureCLI@2
+                  displayName: terraform apply (reviewed plan only)
+                  inputs:
+                    azureSubscription: ${{ parameters.serviceConnection }}
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    workingDirectory: ${{ parameters.workingDirectory }}
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      export ARM_USE_OIDC=true
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_OIDC_TOKEN="$idToken"
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                      terraform init -input=false
+                      terraform apply -input=false -auto-approve \
+                        "$(Pipeline.Workspace)/tfplan/tfplan"

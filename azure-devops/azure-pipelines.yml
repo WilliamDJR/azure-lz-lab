@@ -1,0 +1,49 @@
+# ============================================================================
+# CONSUMER pipeline
+#
+# This is what an application team writes. Note how little it is: because it
+# uses `extends`, the platform team's template owns the ENTIRE structure of
+# this pipeline. The app team can pass parameters; it cannot add a rogue stage,
+# skip the security scan, or reach the production service connection by
+# another path.
+#
+# That constraint is the thing GitHub Actions reusable workflows cannot do,
+# and it is the single best talking point you have about Azure Pipelines.
+# ============================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform/**
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform/**
+
+# In a real estate the templates live in a SEPARATE repository owned by the
+# platform team, pinned to a tag. Never track @main - a template change would
+# otherwise hit every consuming repo at once.
+resources:
+  repositories:
+    - repository: platform-templates
+      type: git
+      name: Platform/pipeline-templates
+      ref: refs/tags/v1.0.0
+
+extends:
+  template: templates/stages/terraform-plan-apply.yml@platform-templates
+  parameters:
+    serviceConnection: sc-azure-alzlab
+    workingDirectory: terraform/20-platform
+    environmentName: alz-lab
+    terraformVersion: 1.9.8
+    # Plan always runs. Apply only runs on main, and only after the
+    # environment's approval check passes.
+    applyOnBranch: refs/heads/main

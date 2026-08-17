@@ -1,0 +1,26 @@
+# ============================================================================
+# STEP-level template
+#
+# GitHub Actions equivalent: a composite action.
+#
+# Step templates are also the mechanism behind one of Azure DevOps' stronger
+# governance features: a pipeline can be restricted to only use steps that
+# come from approved templates, which means a consuming team literally cannot
+# run an arbitrary script against a protected service connection.
+# ============================================================================
+
+parameters:
+  - name: terraformVersion
+    type: string
+    default: 1.9.8
+
+steps:
+  - script: |
+      set -euo pipefail
+      TF_VERSION="${{ parameters.terraformVersion }}"
+      echo "Installing Terraform ${TF_VERSION}"
+      curl -sSLo /tmp/terraform.zip \
+        "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+      sudo unzip -o -q /tmp/terraform.zip -d /usr/local/bin
+      terraform version
+    displayName: Install Terraform ${{ parameters.terraformVersion }}

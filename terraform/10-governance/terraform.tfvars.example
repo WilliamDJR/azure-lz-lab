@@ -1,0 +1,24 @@
+# cp terraform.tfvars.example terraform.tfvars  and fill in.
+# terraform.tfvars is gitignored - never commit a subscription id.
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# Must be unique in the tenant. If you re-run the lab, bump this rather than
+# fighting soft-deleted management groups.
+prefix = "alzlab"
+
+root_display_name = "ALZ Lab (William)"
+
+allowed_locations = ["australiaeast", "australiasoutheast", "global"]
+
+# Day 1: leave false, look at the hierarchy in the portal first.
+# Day 2: flip to true and watch the policies start evaluating.
+move_subscription_into_hierarchy = false
+
+# Start with Audit. Switch to Deny on day 3 and try to create a VM with a
+# public IP - seeing the deployment get rejected is the whole point.
+public_ip_policy_effect = "Audit"
+
+# Paste the log_analytics_workspace_id output from the 20-platform root here
+# once it exists, then re-apply. This switches on the deployIfNotExists demo.
+# log_analytics_workspace_id = "/subscriptions/.../resourceGroups/.../providers/Microsoft.OperationalInsights/workspaces/..."
