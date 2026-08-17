@@ -1,15 +1,16 @@
 ###############################################################################
 # Azure Firewall  (COST TOGGLE: var.enable_firewall)
 #
-# Standard SKU is roughly A$1.50/hour plus ~A$0.02/GB processed. Basic is about
-# a third of that but requires a second, dedicated management subnet and a
-# second public IP.
+# All SKUs are billed while deployed and can add data-processing charges.
+# Basic requires a second, dedicated management subnet and public IP.
 #
 # Turn it on for a session, run scripts/test-egress.sh, then run
 # scripts/destroy-expensive.sh. Do not leave it running overnight.
 ###############################################################################
 
 resource "azurerm_public_ip" "firewall" {
+  provider = azurerm.connectivity
+
   count = var.enable_firewall ? 1 : 0
 
   name                = "pip-${var.prefix}-fw-${var.location}"
@@ -21,6 +22,8 @@ resource "azurerm_public_ip" "firewall" {
 }
 
 resource "azurerm_public_ip" "firewall_mgmt" {
+  provider = azurerm.connectivity
+
   count = var.enable_firewall && var.firewall_sku_tier == "Basic" ? 1 : 0
 
   name                = "pip-${var.prefix}-fw-mgmt-${var.location}"
@@ -43,6 +46,8 @@ resource "azurerm_public_ip" "firewall_mgmt" {
 ###############################################################################
 
 resource "azurerm_firewall_policy" "hub" {
+  provider = azurerm.connectivity
+
   count = var.enable_firewall ? 1 : 0
 
   name                = "afwp-${var.prefix}-hub"
@@ -59,6 +64,8 @@ resource "azurerm_firewall_policy" "hub" {
 }
 
 resource "azurerm_firewall_policy_rule_collection_group" "baseline" {
+  provider = azurerm.connectivity
+
   count = var.enable_firewall ? 1 : 0
 
   name               = "rcg-baseline"
@@ -132,6 +139,8 @@ resource "azurerm_firewall_policy_rule_collection_group" "baseline" {
 }
 
 resource "azurerm_firewall" "hub" {
+  provider = azurerm.connectivity
+
   count = var.enable_firewall ? 1 : 0
 
   name                = "afw-${var.prefix}-hub-${var.location}"
@@ -169,6 +178,8 @@ resource "azurerm_firewall" "hub" {
 ###############################################################################
 
 resource "azurerm_monitor_diagnostic_setting" "firewall" {
+  provider = azurerm.connectivity
+
   count = var.enable_firewall ? 1 : 0
 
   name                           = "diag-to-law"
@@ -188,8 +199,7 @@ resource "azurerm_monitor_diagnostic_setting" "firewall" {
     category = "AZFWDnsQuery"
   }
 
-  metric {
+  enabled_metric {
     category = "AllMetrics"
-    enabled  = true
   }
 }

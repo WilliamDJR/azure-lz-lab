@@ -9,7 +9,7 @@
 # private IP inside your VNet - but Azure's version depends on a DNS override
 # that you have to wire up yourself, and that is where it goes wrong.
 #
-# The chain, in order. Memorise this:
+# The resolution chain, in order:
 #
 #   1. Client resolves myaccount.blob.core.windows.net
 #   2. Public Azure DNS returns a CNAME:
@@ -39,6 +39,8 @@ resource "random_string" "sa_suffix" {
 }
 
 resource "azurerm_storage_account" "private" {
+  provider = azurerm.corp_dev
+
   name                = "st${var.prefix}pe${random_string.sa_suffix.result}"
   resource_group_name = azurerm_resource_group.landing_zone.name
   location            = azurerm_resource_group.landing_zone.location
@@ -63,6 +65,8 @@ resource "azurerm_storage_account" "private" {
 #   SQL DB    -> privatelink.database.windows.net
 #   AKS API   -> privatelink.<region>.azmk8s.io
 resource "azurerm_private_dns_zone" "blob" {
+  provider = azurerm.connectivity
+
   name                = "privatelink.blob.core.windows.net"
   resource_group_name = azurerm_resource_group.connectivity.name
   tags                = var.tags
@@ -70,6 +74,8 @@ resource "azurerm_private_dns_zone" "blob" {
 
 # Link the zone to the SPOKE so workloads there resolve privately.
 resource "azurerm_private_dns_zone_virtual_network_link" "blob_to_spoke" {
+  provider = azurerm.connectivity
+
   name                  = "link-to-corp-spoke"
   resource_group_name   = azurerm_resource_group.connectivity.name
   private_dns_zone_name = azurerm_private_dns_zone.blob.name
@@ -81,6 +87,8 @@ resource "azurerm_private_dns_zone_virtual_network_link" "blob_to_spoke" {
 # ...and to the HUB, so anything in the hub (and, once the firewall DNS proxy
 # is on, anything resolving through the firewall) sees the same answer.
 resource "azurerm_private_dns_zone_virtual_network_link" "blob_to_hub" {
+  provider = azurerm.connectivity
+
   name                  = "link-to-hub"
   resource_group_name   = azurerm_resource_group.connectivity.name
   private_dns_zone_name = azurerm_private_dns_zone.blob.name
@@ -90,6 +98,8 @@ resource "azurerm_private_dns_zone_virtual_network_link" "blob_to_hub" {
 }
 
 resource "azurerm_private_endpoint" "blob" {
+  provider = azurerm.corp_dev
+
   name                = "pe-${var.prefix}-blob"
   resource_group_name = azurerm_resource_group.landing_zone.name
   location            = azurerm_resource_group.landing_zone.location

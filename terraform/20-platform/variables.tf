@@ -2,9 +2,27 @@
 # Core
 ###############################################################################
 
-variable "subscription_id" {
-  description = "Subscription to deploy the lab into."
-  type        = string
+variable "subscription_ids" {
+  description = "Existing Azure subscription IDs mapped to their ALZ roles."
+  type = object({
+    management   = string
+    connectivity = string
+    identity     = string
+    security     = string
+    corp_dev     = string
+    corp_prod    = string
+    online_dev   = string
+    online_prod  = string
+    sandbox      = string
+  })
+
+  validation {
+    condition = alltrue([
+      for subscription_id in values(var.subscription_ids) :
+      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", subscription_id))
+    ]) && length(distinct(values(var.subscription_ids))) == length(values(var.subscription_ids))
+    error_message = "Every subscription ID must be a GUID and each ALZ role must use a different subscription."
+  }
 }
 
 variable "prefix" {
@@ -24,7 +42,7 @@ variable "tags" {
   type        = map(string)
   default = {
     lab         = "true"
-    owner       = "william"
+    owner       = "platform-team"
     environment = "lab"
   }
 }
@@ -65,7 +83,7 @@ variable "onprem_address_space" {
 ###############################################################################
 
 variable "enable_firewall" {
-  description = "Deploy Azure Firewall + firewall policy + forced-tunnelling UDR on the spoke. ~A$1.50/hour plus data processing."
+  description = "Deploy Azure Firewall, Firewall Policy, and a forced-tunnelling UDR. This is continuously billed; verify current regional pricing first."
   type        = bool
   default     = false
 }
@@ -82,7 +100,7 @@ variable "firewall_sku_tier" {
 }
 
 variable "enable_vpn_gateway" {
-  description = "Deploy a VPN gateway in the hub. ~A$0.19/hour (VpnGw1) and takes 25-45 minutes to provision."
+  description = "Deploy a continuously billed VpnGw1 gateway in the hub. Provisioning commonly takes tens of minutes."
   type        = bool
   default     = false
 }
@@ -94,9 +112,15 @@ variable "enable_simulated_onprem" {
 }
 
 variable "enable_test_vm" {
-  description = "Deploy a Standard_B1s Linux VM in the spoke with NO public IP (~A$15/month). You reach it with 'az vm run-command', which needs no Bastion and no jump host - this is how you test private DNS resolution for free."
+  description = "Deploy a billed Standard_B1s Linux VM without a public IP. Use Azure Run Command to test private DNS without Bastion or a jump host."
   type        = bool
   default     = true
+}
+
+variable "enable_sentinel" {
+  description = "Create a dedicated Security workspace and enable Microsoft Sentinel. Disabled by default because ingestion and enabled data connectors can consume credit."
+  type        = bool
+  default     = false
 }
 
 ###############################################################################
@@ -104,10 +128,15 @@ variable "enable_test_vm" {
 ###############################################################################
 
 variable "vpn_shared_key" {
-  description = "Pre-shared key for the simulated site-to-site connection."
+  description = "Pre-shared key for the simulated site-to-site connection. Set it locally only when enable_simulated_onprem is true."
   type        = string
-  default     = "L4bSh4redKey-ChangeMe"
+  default     = null
   sensitive   = true
+
+  validation {
+    condition     = var.vpn_shared_key == null || length(var.vpn_shared_key) >= 16
+    error_message = "vpn_shared_key must be null or at least 16 characters."
+  }
 }
 
 variable "log_retention_days" {

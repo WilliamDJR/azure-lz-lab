@@ -16,6 +16,7 @@ output "hierarchy" {
         azurerm_management_group.platform_identity.name,
         azurerm_management_group.platform_management.name,
         azurerm_management_group.platform_connectivity.name,
+        azurerm_management_group.platform_security.name,
       ]
       landing_zones = [
         azurerm_management_group.corp.name,
@@ -25,4 +26,9 @@ output "hierarchy" {
       decommissioned = azurerm_management_group.decommissioned.name
     }
   }
+}
+
+output "subscription_placement" {
+  description = "Target management-group ID for every subscription role."
+  value       = local.subscription_management_group_ids
 }

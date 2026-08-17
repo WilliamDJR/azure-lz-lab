@@ -10,12 +10,16 @@
 ###############################################################################
 
 resource "azurerm_resource_group" "landing_zone" {
+  provider = azurerm.corp_dev
+
   name     = "rg-${var.prefix}-corp-app1-${var.location}"
   location = var.location
   tags     = var.tags
 }
 
 resource "azurerm_virtual_network" "spoke" {
+  provider = azurerm.corp_dev
+
   name                = "vnet-${var.prefix}-corp-${var.location}"
   resource_group_name = azurerm_resource_group.landing_zone.name
   location            = azurerm_resource_group.landing_zone.location
@@ -24,6 +28,8 @@ resource "azurerm_virtual_network" "spoke" {
 }
 
 resource "azurerm_subnet" "workload" {
+  provider = azurerm.corp_dev
+
   name                 = "snet-workload"
   resource_group_name  = azurerm_resource_group.landing_zone.name
   virtual_network_name = azurerm_virtual_network.spoke.name
@@ -31,6 +37,8 @@ resource "azurerm_subnet" "workload" {
 }
 
 resource "azurerm_subnet" "private_link" {
+  provider = azurerm.corp_dev
+
   name                 = "snet-privatelink"
   resource_group_name  = azurerm_resource_group.landing_zone.name
   virtual_network_name = azurerm_virtual_network.spoke.name
@@ -54,6 +62,8 @@ resource "azurerm_subnet" "private_link" {
 ###############################################################################
 
 resource "azurerm_network_security_group" "workload" {
+  provider = azurerm.corp_dev
+
   name                = "nsg-${var.prefix}-corp-workload"
   resource_group_name = azurerm_resource_group.landing_zone.name
   location            = azurerm_resource_group.landing_zone.location
@@ -87,6 +97,8 @@ resource "azurerm_network_security_group" "workload" {
 }
 
 resource "azurerm_subnet_network_security_group_association" "workload" {
+  provider = azurerm.corp_dev
+
   subnet_id                 = azurerm_subnet.workload.id
   network_security_group_id = azurerm_network_security_group.workload.id
 }
@@ -112,6 +124,8 @@ resource "azurerm_subnet_network_security_group_association" "workload" {
 ###############################################################################
 
 resource "azurerm_route_table" "spoke" {
+  provider = azurerm.corp_dev
+
   count = var.enable_firewall ? 1 : 0
 
   name                          = "rt-${var.prefix}-corp-workload"
@@ -139,6 +153,8 @@ resource "azurerm_route_table" "spoke" {
 }
 
 resource "azurerm_subnet_route_table_association" "workload" {
+  provider = azurerm.corp_dev
+
   count = var.enable_firewall ? 1 : 0
 
   subnet_id      = azurerm_subnet.workload.id

@@ -56,6 +56,12 @@ resource "azurerm_management_group" "platform_connectivity" {
   parent_management_group_id = azurerm_management_group.platform.id
 }
 
+resource "azurerm_management_group" "platform_security" {
+  name                       = "${var.prefix}-platform-security"
+  display_name               = "Security"
+  parent_management_group_id = azurerm_management_group.platform.id
+}
+
 # --- Landing zones: subscriptions APPLICATION TEAMS own ---------------------
 resource "azurerm_management_group" "landing_zones" {
   name                       = "${var.prefix}-landingzones"
@@ -100,11 +106,46 @@ resource "azurerm_management_group" "decommissioned" {
 # GCP equivalent: moving a project into a folder.
 ###############################################################################
 
-resource "azurerm_management_group_subscription_association" "lab" {
-  count = var.move_subscription_into_hierarchy ? 1 : 0
+locals {
+  subscription_management_group_ids = {
+    management   = azurerm_management_group.platform_management.id
+    connectivity = azurerm_management_group.platform_connectivity.id
+    identity     = azurerm_management_group.platform_identity.id
+    security     = azurerm_management_group.platform_security.id
+    corp_dev     = azurerm_management_group.corp.id
+    corp_prod    = azurerm_management_group.corp.id
+    online_dev   = azurerm_management_group.online.id
+    online_prod  = azurerm_management_group.online.id
+    sandbox      = azurerm_management_group.sandbox.id
+  }
 
-  management_group_id = azurerm_management_group.corp.id
-  subscription_id     = "/subscriptions/${var.subscription_id}"
+  role_assignment_scopes = {
+    root          = azurerm_management_group.intermediate_root.id
+    platform      = azurerm_management_group.platform.id
+    identity      = azurerm_management_group.platform_identity.id
+    management    = azurerm_management_group.platform_management.id
+    connectivity  = azurerm_management_group.platform_connectivity.id
+    security      = azurerm_management_group.platform_security.id
+    landing_zones = azurerm_management_group.landing_zones.id
+    corp          = azurerm_management_group.corp.id
+    online        = azurerm_management_group.online.id
+    sandbox       = azurerm_management_group.sandbox.id
+  }
+}
+
+resource "azurerm_management_group_subscription_association" "role" {
+  for_each = var.move_subscriptions_into_hierarchy ? var.subscription_ids : {}
+
+  management_group_id = local.subscription_management_group_ids[each.key]
+  subscription_id     = "/subscriptions/${each.value}"
+}
+
+resource "azurerm_role_assignment" "management_group" {
+  for_each = var.role_assignments
+
+  scope                = local.role_assignment_scopes[each.value.scope_key]
+  principal_id         = each.value.principal_id
+  role_definition_name = each.value.role_definition_name
 }
 
 ###############################################################################
@@ -210,7 +251,7 @@ resource "azurerm_management_group_policy_assignment" "deny_nic_public_ip" {
 # most worth understanding. A deployIfNotExists policy does not just block a
 # non-compliant resource - it DEPLOYS the missing configuration for you.
 #
-# Two consequences you must be able to state out loud:
+# Two implementation requirements:
 #   1. The assignment needs a MANAGED IDENTITY (identity {} + location).
 #   2. That identity needs an RBAC role at the assignment scope, otherwise
 #      remediation silently fails with "insufficient permissions". This is the
@@ -241,10 +282,10 @@ resource "azurerm_management_group_policy_assignment" "activity_log_to_law" {
 }
 
 # Without this, the policy above will evaluate but never successfully remediate.
-resource "azurerm_role_assignment" "policy_identity_contributor" {
+resource "azurerm_role_assignment" "policy_identity_monitoring_contributor" {
   count = var.log_analytics_workspace_id == null ? 0 : 1
 
   scope                = azurerm_management_group.intermediate_root.id
-  role_definition_name = "Contributor"
+  role_definition_name = "Monitoring Contributor"
   principal_id         = azurerm_management_group_policy_assignment.activity_log_to_law[0].identity[0].principal_id
 }

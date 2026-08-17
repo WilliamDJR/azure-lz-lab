@@ -1,12 +1,12 @@
-# cp terraform.tfvars.example terraform.tfvars  and fill in.
+# Copy this file to terraform.tfvars. Subscription IDs live in the shared
+# ../subscriptions.tfvars file and are supplied with -var-file.
 
-subscription_id = "00000000-0000-0000-0000-000000000000"
 prefix          = "alzlab"
 location        = "australiaeast"
 
 # ---------------------------------------------------------------------------
 # Cost toggles. Everything below bills by the hour while it exists.
-# Baseline (all false except the VM) is roughly A$20-25/month.
+# The VM, Private Endpoint and log ingestion can still incur baseline charges.
 # ---------------------------------------------------------------------------
 
 # Day 1-2: everything off except the VM. Build the topology, wire the private
@@ -15,6 +15,7 @@ enable_firewall         = false
 enable_vpn_gateway      = false
 enable_simulated_onprem = false
 enable_test_vm          = true
+enable_sentinel         = false
 
 # Day 3 (one afternoon): turn the firewall on, watch the effective routes
 # change, break egress on purpose, read the logs in KQL, then turn it back off.
@@ -25,5 +26,6 @@ enable_test_vm          = true
 # build, so start the apply and go do the reading.
 #   enable_vpn_gateway      = true
 #   enable_simulated_onprem = true
+#   vpn_shared_key          = "set-a-local-random-value-at-least-16-characters"
 
 log_retention_days = 30

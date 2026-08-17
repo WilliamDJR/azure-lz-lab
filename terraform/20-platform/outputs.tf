@@ -3,6 +3,36 @@ output "log_analytics_workspace_id" {
   value       = azurerm_log_analytics_workspace.platform.id
 }
 
+output "security_log_analytics_workspace_id" {
+  description = "Dedicated Sentinel workspace ID when enable_sentinel is true."
+  value       = var.enable_sentinel ? azurerm_log_analytics_workspace.security[0].id : null
+}
+
+output "subscription_ids" {
+  description = "Subscription role map used for this deployment."
+  value       = var.subscription_ids
+}
+
+output "corp_dev_subscription_id" {
+  value = var.subscription_ids.corp_dev
+}
+
+output "connectivity_subscription_id" {
+  value = var.subscription_ids.connectivity
+}
+
+output "management_subscription_id" {
+  value = var.subscription_ids.management
+}
+
+output "security_subscription_id" {
+  value = var.subscription_ids.security
+}
+
+output "sandbox_subscription_id" {
+  value = var.subscription_ids.sandbox
+}
+
 output "hub_vnet_id" {
   value = azurerm_virtual_network.hub.id
 }
@@ -47,13 +77,13 @@ output "connectivity_resource_group" {
   value = azurerm_resource_group.connectivity.name
 }
 
-output "estimated_hourly_cost_aud" {
-  description = "Rough order of magnitude only. Check the Azure pricing calculator for real numbers."
-  value = join(" + ", compact([
-    "baseline ~A$0.03",
-    var.enable_firewall ? (var.firewall_sku_tier == "Basic" ? "firewall ~A$0.50" : "firewall ~A$1.50") : "",
-    var.enable_vpn_gateway ? "hub gateway ~A$0.19" : "",
-    var.enable_simulated_onprem ? "onprem gateway ~A$0.19" : "",
-    var.enable_test_vm ? "test vm ~A$0.02" : "",
-  ]))
+output "enabled_cost_features" {
+  description = "Billed lab features currently enabled. Check Cost Management and the current pricing calculator for amounts."
+  value = {
+    firewall           = var.enable_firewall
+    hub_vpn_gateway    = var.enable_vpn_gateway
+    simulated_onprem   = var.enable_simulated_onprem
+    test_vm            = var.enable_test_vm
+    sentinel_workspace = var.enable_sentinel
+  }
 }

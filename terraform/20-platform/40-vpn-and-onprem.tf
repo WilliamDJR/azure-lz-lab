@@ -16,6 +16,8 @@
 ###############################################################################
 
 resource "azurerm_public_ip" "vpn_gateway" {
+  provider = azurerm.connectivity
+
   count = var.enable_vpn_gateway ? 1 : 0
 
   name                = "pip-${var.prefix}-vgw-hub"
@@ -27,6 +29,8 @@ resource "azurerm_public_ip" "vpn_gateway" {
 }
 
 resource "azurerm_virtual_network_gateway" "hub" {
+  provider = azurerm.connectivity
+
   count = var.enable_vpn_gateway ? 1 : 0
 
   name                = "vgw-${var.prefix}-hub-${var.location}"
@@ -38,7 +42,7 @@ resource "azurerm_virtual_network_gateway" "hub" {
   sku      = "VpnGw1"
 
   active_active = false
-  enable_bgp    = false
+  bgp_enabled   = false
   tags          = var.tags
 
   ip_configuration {
@@ -58,6 +62,8 @@ resource "azurerm_virtual_network_gateway" "hub" {
 ###############################################################################
 
 resource "azurerm_resource_group" "onprem" {
+  provider = azurerm.sandbox
+
   count = var.enable_simulated_onprem ? 1 : 0
 
   name     = "rg-${var.prefix}-simulated-onprem-${var.location}"
@@ -66,6 +72,8 @@ resource "azurerm_resource_group" "onprem" {
 }
 
 resource "azurerm_virtual_network" "onprem" {
+  provider = azurerm.sandbox
+
   count = var.enable_simulated_onprem ? 1 : 0
 
   name                = "vnet-${var.prefix}-onprem"
@@ -76,6 +84,8 @@ resource "azurerm_virtual_network" "onprem" {
 }
 
 resource "azurerm_subnet" "onprem_gateway" {
+  provider = azurerm.sandbox
+
   count = var.enable_simulated_onprem ? 1 : 0
 
   name                 = "GatewaySubnet"
@@ -85,6 +95,8 @@ resource "azurerm_subnet" "onprem_gateway" {
 }
 
 resource "azurerm_subnet" "onprem_workload" {
+  provider = azurerm.sandbox
+
   count = var.enable_simulated_onprem ? 1 : 0
 
   name                 = "snet-onprem-servers"
@@ -94,6 +106,8 @@ resource "azurerm_subnet" "onprem_workload" {
 }
 
 resource "azurerm_public_ip" "onprem_gateway" {
+  provider = azurerm.sandbox
+
   count = var.enable_simulated_onprem ? 1 : 0
 
   name                = "pip-${var.prefix}-vgw-onprem"
@@ -105,6 +119,8 @@ resource "azurerm_public_ip" "onprem_gateway" {
 }
 
 resource "azurerm_virtual_network_gateway" "onprem" {
+  provider = azurerm.sandbox
+
   count = var.enable_simulated_onprem ? 1 : 0
 
   name                = "vgw-${var.prefix}-onprem"
@@ -127,6 +143,8 @@ resource "azurerm_virtual_network_gateway" "onprem" {
 # A VNet-to-VNet connection needs BOTH directions. Create only one and the
 # tunnel sits in "Connecting" forever - a good failure to see on purpose once.
 resource "azurerm_virtual_network_gateway_connection" "hub_to_onprem" {
+  provider = azurerm.connectivity
+
   count = var.enable_simulated_onprem ? 1 : 0
 
   name                = "cn-hub-to-onprem"
@@ -141,6 +159,8 @@ resource "azurerm_virtual_network_gateway_connection" "hub_to_onprem" {
 }
 
 resource "azurerm_virtual_network_gateway_connection" "onprem_to_hub" {
+  provider = azurerm.sandbox
+
   count = var.enable_simulated_onprem ? 1 : 0
 
   name                = "cn-onprem-to-hub"

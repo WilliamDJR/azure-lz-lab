@@ -17,7 +17,7 @@ parameters:
     type: string
   - name: terraformVersion
     type: string
-    default: 1.9.8
+    default: 1.15.8
   - name: applyOnBranch
     type: string
     default: refs/heads/main
@@ -74,7 +74,12 @@ stages:
                 export ARM_OIDC_TOKEN="$idToken"
                 export ARM_TENANT_ID="$tenantId"
                 export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
-                terraform init -input=false
+                terraform init -input=false \
+                  -backend-config="resource_group_name=$(TF_BACKEND_RESOURCE_GROUP)" \
+                  -backend-config="storage_account_name=$(TF_BACKEND_STORAGE_ACCOUNT)" \
+                  -backend-config="container_name=$(TF_BACKEND_CONTAINER)" \
+                  -backend-config="key=$(TF_BACKEND_KEY)" \
+                  -backend-config="use_azuread_auth=true"
                 terraform validate
 
           # The platform team injects this. A consuming pipeline has no way to
@@ -118,9 +123,16 @@ stages:
                 export ARM_OIDC_TOKEN="$idToken"
                 export ARM_TENANT_ID="$tenantId"
                 export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
-                terraform init -input=false
+                terraform init -input=false \
+                  -backend-config="resource_group_name=$(TF_BACKEND_RESOURCE_GROUP)" \
+                  -backend-config="storage_account_name=$(TF_BACKEND_STORAGE_ACCOUNT)" \
+                  -backend-config="container_name=$(TF_BACKEND_CONTAINER)" \
+                  -backend-config="key=$(TF_BACKEND_KEY)" \
+                  -backend-config="use_azuread_auth=true"
                 terraform plan -input=false -out=tfplan
                 terraform show -no-color tfplan > tfplan.txt
+            env:
+              TF_VAR_subscription_ids: $(SUBSCRIPTION_IDS_JSON)
 
           - publish: ${{ parameters.workingDirectory }}/tfplan
             artifact: tfplan
@@ -180,6 +192,13 @@ stages:
                       export ARM_OIDC_TOKEN="$idToken"
                       export ARM_TENANT_ID="$tenantId"
                       export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
-                      terraform init -input=false
+                      terraform init -input=false \
+                        -backend-config="resource_group_name=$(TF_BACKEND_RESOURCE_GROUP)" \
+                        -backend-config="storage_account_name=$(TF_BACKEND_STORAGE_ACCOUNT)" \
+                        -backend-config="container_name=$(TF_BACKEND_CONTAINER)" \
+                        -backend-config="key=$(TF_BACKEND_KEY)" \
+                        -backend-config="use_azuread_auth=true"
                       terraform apply -input=false -auto-approve \
                         "$(Pipeline.Workspace)/tfplan/tfplan"
+                  env:
+                    TF_VAR_subscription_ids: $(SUBSCRIPTION_IDS_JSON)

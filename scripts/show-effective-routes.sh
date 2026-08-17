@@ -16,7 +16,8 @@ cd "$(dirname "$0")/../terraform/20-platform"
 
 TF=${TF:-terraform}
 RG=$($TF output -raw landing_zone_resource_group)
-NIC=$(az network nic list -g "$RG" --query "[0].name" -o tsv)
+SUBSCRIPTION_ID=$($TF output -raw corp_dev_subscription_id)
+NIC=$(az network nic list --subscription "$SUBSCRIPTION_ID" -g "$RG" --query "[0].name" -o tsv)
 
 echo "Effective routes on NIC: $NIC (resource group $RG)"
 echo
@@ -24,6 +25,7 @@ echo
 az network nic show-effective-route-table \
   --resource-group "$RG" \
   --name "$NIC" \
+  --subscription "$SUBSCRIPTION_ID" \
   --output table
 
 cat <<'EOF'

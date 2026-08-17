@@ -19,6 +19,7 @@ RG=$($TF output -raw landing_zone_resource_group)
 VM=$($TF output -raw test_vm_name)
 FQDN=$($TF output -raw storage_private_fqdn)
 EXPECTED=$($TF output -raw private_endpoint_ip)
+SUBSCRIPTION_ID=$($TF output -raw corp_dev_subscription_id)
 
 echo "Resource group : $RG"
 echo "VM             : $VM"
@@ -29,6 +30,7 @@ echo "Running nslookup on the VM via the Azure control plane..."
 echo
 
 az vm run-command invoke \
+  --subscription "$SUBSCRIPTION_ID" \
   --resource-group "$RG" \
   --name "$VM" \
   --command-id RunShellScript \
@@ -55,7 +57,7 @@ makes private zones work at all.
 
 Now break it on purpose:
 
-    terraform destroy -target=azurerm_private_dns_zone_virtual_network_link.blob_to_spoke
+    terraform destroy -var-file=../subscriptions.tfvars -target=azurerm_private_dns_zone_virtual_network_link.blob_to_spoke
     ./scripts/test-private-dns.sh
 
 The name still resolves - but to a PUBLIC IP. Traffic then fails closed
@@ -63,6 +65,6 @@ because the storage account has public_network_access_enabled = false.
 "It resolves but I cannot connect" is the exact symptom, and a missing VNet
 link is the most common cause of it in real estates.
 
-Put it back with:  terraform apply
+Put it back with:  terraform apply -var-file=../subscriptions.tfvars
 ------------------------------------------------------------------------------
 EOF

@@ -1,0 +1,17 @@
+# Copy this file to subscriptions.tfvars and replace every placeholder.
+# Keep the file local: *.tfvars is excluded by .gitignore.
+#
+# Billing placement is configured when subscriptions are created. This file
+# maps existing subscription IDs to their ALZ governance and platform roles.
+
+subscription_ids = {
+  management   = "00000000-0000-0000-0000-000000000001"
+  connectivity = "00000000-0000-0000-0000-000000000002"
+  identity     = "00000000-0000-0000-0000-000000000003"
+  security     = "00000000-0000-0000-0000-000000000004"
+  corp_dev     = "00000000-0000-0000-0000-000000000005"
+  corp_prod    = "00000000-0000-0000-0000-000000000006"
+  online_dev   = "00000000-0000-0000-0000-000000000007"
+  online_prod  = "00000000-0000-0000-0000-000000000008"
+  sandbox      = "00000000-0000-0000-0000-000000000009"
+}

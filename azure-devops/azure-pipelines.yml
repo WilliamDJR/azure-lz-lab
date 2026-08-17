@@ -7,8 +7,7 @@
 # skip the security scan, or reach the production service connection by
 # another path.
 #
-# That constraint is the thing GitHub Actions reusable workflows cannot do,
-# and it is the single best talking point you have about Azure Pipelines.
+# That constraint is a material difference from ordinary reusable workflows.
 # ============================================================================
 
 trigger:
@@ -43,7 +42,7 @@ extends:
     serviceConnection: sc-azure-alzlab
     workingDirectory: terraform/20-platform
     environmentName: alz-lab
-    terraformVersion: 1.9.8
+    terraformVersion: 1.15.8
     # Plan always runs. Apply only runs on main, and only after the
     # environment's approval check passes.
     applyOnBranch: refs/heads/main

@@ -176,6 +176,12 @@ Learn enough to:
 2. Maintain and govern an existing Azure DevOps platform safely.
 3. Assess whether to retain, integrate, or migrate parts of the platform based on evidence.
 
+## 7. Accelerator-generated delivery
+
+The pipeline in `azure-devops/` is a compact teaching example. The official ALZ IaC Accelerator can instead bootstrap an Azure DevOps repository, federated identities, remote Terraform state and the Platform landing zone delivery pipelines as one reviewed system.
+
+Follow [05-alz-accelerator.md](05-alz-accelerator.md) after this lab. Compare the controls, but do not overwrite the generated Accelerator repository with this sample pipeline; upgrade and operate the official generated repository as the platform source of truth.
+
 ## Official references
 
 - [Azure DevOps and GitHub: Journeying into the AI Era](https://devblogs.microsoft.com/devops/azure-devops-and-github-journeying-into-the-ai-era/)

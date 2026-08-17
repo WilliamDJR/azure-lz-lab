@@ -42,7 +42,8 @@ Tenant Root Group                         <- avoid broad policy here
     ├── Platform                          <- shared platform subscriptions
     │   ├── Identity                      <- AD DS / sync / domain services
     │   ├── Management                    <- monitoring / backup / automation
-    │   └── Connectivity                  <- hub / gateways / firewall / DNS
+    │   ├── Connectivity                  <- hub / gateways / firewall / DNS
+    │   └── Security                      <- Sentinel / SOC-owned services
     ├── Landing Zones                     <- application subscriptions
     │   ├── Corp                          <- workloads needing private corporate connectivity
     │   └── Online                        <- internet-facing workloads
@@ -50,12 +51,13 @@ Tenant Root Group                         <- avoid broad policy here
     └── Decommissioned                    <- subscriptions being retired
 ```
 
-### Four design decisions behind the hierarchy
+### Five design decisions behind the hierarchy
 
 1. **Why use an intermediate root?** The Tenant Root Group is universal and cannot be removed. A Deny policy there can affect subscriptions the platform team does not own and is difficult to roll back. An intermediate root creates a lifecycle-managed ALZ boundary and allows parallel versions of the hierarchy.
 2. **Why separate Corp and Online?** They require different guardrails. Corp workloads have private connectivity to the enterprise and generally prohibit direct public IPs. Online workloads are designed for internet exposure. Policy requirements, not organizational charts, justify the split.
 3. **Why keep Sandbox outside Landing Zones?** Engineers need a safe place for experimentation. The trade is deliberately relaxed policy in exchange for no connectivity to the corporate network.
 4. **Why separate Platform into subscriptions?** Subscriptions are quota, billing, and access boundaries. Connectivity costs can be allocated centrally; identity and network changes have different blast radii; and monitoring should remain accessible when a workload subscription fails.
+5. **Why add Security?** Security operations often needs a different access boundary from platform operations. A dedicated subscription lets the SOC own Sentinel and related controls without receiving broad write access to Management or Connectivity.
 
 ## What belongs in the Platform subscriptions?
 
@@ -87,6 +89,14 @@ Monitoring and recovery services should remain accessible when the resources the
 - Central `privatelink.*` private DNS zones and DNS Private Resolver
 - Shared ingress such as Front Door, Traffic Manager, or Application Gateway
 - Public IP prefixes and DDoS Protection plans
+
+### Security subscription
+
+- Microsoft Sentinel workspace and data connectors when enabled
+- SOC-owned automation, playbooks and investigation services
+- Security tooling that requires a separate access and cost boundary
+
+The subscription can remain empty until those capabilities are needed. Creating a governance boundary does not require enabling billed security services.
 
 ### Workload VMs and AKS belong in application landing zones
 
@@ -121,7 +131,7 @@ Examples:
 
 | # | Design area | Core question | This lab |
 |---|---|---|---|
-| 1 | **Azure billing and Entra tenant** | Tenant and billing hierarchy | Single-tenant lab only |
+| 1 | **Azure billing and Entra tenant** | Tenant and billing hierarchy | One tenant, one MCA invoice section, nine role subscriptions; see [04-subscription-vending.md](04-subscription-vending.md) |
 | 2 | **Identity and access management** | Who can do what, and how is privilege controlled? | Role assignments and managed identities; PIM is conceptual |
 | 3 | **Resource organization** | How are management groups, subscriptions, resource groups, names, and tags structured? | `10-governance` |
 | 4 | **Network topology and connectivity** | Hub-Spoke or Virtual WAN, egress, and hybrid connectivity | `20-platform`; see [02-networking.md](02-networking.md) |
@@ -169,6 +179,8 @@ The word *accelerator* can refer to different things:
 
 Clarify which accelerator is being discussed. The portal experience, reusable IaC modules, and bootstrap tooling solve different problems.
 
+After the manual governance, networking and delivery labs, follow [05-alz-accelerator.md](05-alz-accelerator.md) to generate and review the official Terraform path.
+
 ### Azure ALZ is not identical to Argo CD GitOps
 
 | | Kubernetes with Argo CD | Azure ALZ with Terraform |
@@ -208,7 +220,7 @@ Operate the landing zone as a product with an owner, backlog, versions, release 
 ## Hands-on checklist
 
 - [ ] Apply `terraform/10-governance/` and inspect the hierarchy in the portal.
-- [ ] Set `move_subscription_into_hierarchy = true` and verify subscription placement under Corp.
+- [ ] Set `move_subscriptions_into_hierarchy = true` and verify all role subscriptions are placed correctly.
 - [ ] Inspect Policy compliance after the initial evaluation completes.
 - [ ] Change `public_ip_policy_effect` from `Audit` to `Deny`, attempt a public-IP VM deployment, and identify the assignment ID in the error.
 - [ ] Create a time-bound policy exemption and observe its compliance state.

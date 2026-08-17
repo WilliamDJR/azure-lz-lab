@@ -1,387 +1,363 @@
-# Azure Landing Zone Learning and Deployment Lab
+# Azure Landing Zone Enterprise Lab
 
 [中文版](README_cn.md)
 
-> This lab is organized as **foundations first, deployment and validation second**. It uses Terraform to build Azure Landing Zone (ALZ) governance, Hub-Spoke networking, Private Endpoint, Azure Firewall, VPN Gateway, observability, and an Azure Pipelines example.
+This repository is organized as **foundations first, deployment and validation second**. It builds an enterprise-shaped Azure Landing Zone (ALZ) across multiple subscriptions while keeping expensive services optional and short-lived.
 
-## Learning outcomes
+The lab is intentionally smaller than a production ALZ, but its boundaries are realistic: billing and governance are separate, platform capabilities have dedicated subscriptions, development and production have separate workload subscriptions, Terraform state is remote, and every Azure CLI operation is subscription-aware.
 
-After completing the main path, you should be able to:
+## What the lab now covers
 
-- Explain the boundaries between management groups, subscriptions, platform landing zones, and application landing zones.
-- Use Azure Policy for location restrictions, public-IP controls, and DeployIfNotExists (DINE) governance.
-- Explain Hub-Spoke, system routes, UDRs, VNet peering, gateway route propagation, and forced tunnelling.
-- Validate the Private Endpoint DNS chain from a workload and diagnose common failure modes.
-- Deploy Azure Firewall and simulated hybrid connectivity, then observe changes in effective routes and logs.
-- Use Terraform and Azure Pipelines to create a repeatable, reviewable infrastructure-delivery process.
+| ALZ design area | Lab coverage |
+|---|---|
+| Billing and tenant | MCA Billing Profile/Invoice Section bootstrap, multi-subscription manifest, staged subscription creation |
+| Identity and access | Management-group RBAC inputs, managed identities, pipeline federation; PIM remains a manual extension |
+| Resource organization | Intermediate root, Platform, Security, Corp, Online, Sandbox, Decommissioned, and nine role subscriptions |
+| Network and connectivity | Cross-subscription Hub-Spoke, UDR, Firewall, VPN Gateway, Private Endpoint, and centralized Private DNS |
+| Security | Policy, NSG, Firewall, private access, optional dedicated Sentinel workspace |
+| Management and operations | Central Log Analytics, diagnostics, KQL, daily ingestion caps, subscription budgets |
+| Governance | Audit, Deny, DINE, compliance and remediation patterns |
+| Platform automation | Remote Terraform state, provider aliases, reusable Azure Pipelines example, safe cleanup scripts |
 
-## Is the current lab sufficient?
+## Target architecture
 
-The repository covers the most important governance, networking, Private Link, logging, and automation topics for understanding ALZ and completing an end-to-end hands-on exercise. It is not a complete Azure curriculum or a production-ready ALZ.
+```text
+MCA Billing Profile + Invoice Section (shared eligible credit pool)
+  ├── Management subscription ───── Log Analytics + Terraform state
+  ├── Connectivity subscription ─── Hub + Firewall + VPN + Private DNS
+  ├── Identity subscription ──────── reserved identity infrastructure boundary
+  ├── Security subscription ──────── optional Sentinel workspace
+  ├── Corp Dev subscription ──────── lab workload spoke + private storage
+  ├── Corp Prod subscription ─────── governed production boundary
+  ├── Online Dev subscription ────── governed internet-workload boundary
+  ├── Online Prod subscription ───── governed production boundary
+  └── Sandbox subscription ───────── isolated experiments / simulated on-premises
 
-| ALZ design area | Coverage | Included here |
-|---|---|---|
-| Billing and tenant | Introductory | Single-subscription lab, cost switches, and budget guidance |
-| Identity and access | Limited | Managed identities and pipeline workload identity; no systematic RBAC/PIM lab |
-| Resource organization | Strong | Management groups, subscription placement, and Platform/Corp/Online/Sandbox hierarchy |
-| Network and connectivity | Strong | Hub-Spoke, UDR, Firewall, VPN Gateway, and Private DNS |
-| Security | Partial | Azure Policy, NSG, and Firewall; no Defender for Cloud or Key Vault lab |
-| Management and operations | Partial | Log Analytics, diagnostic settings, and KQL; no alerting, backup, or disaster recovery lab |
-| Governance | Strong | Audit, Deny, DINE, compliance evaluation, and remediation concepts |
-| Platform automation and DevOps | Strong | Terraform, Azure Pipelines templates, approvals, and OIDC |
+Entra tenant
+└── ALZ intermediate root
+    ├── Platform
+    │   ├── Management
+    │   ├── Connectivity
+    │   ├── Identity
+    │   └── Security
+    ├── Landing Zones
+    │   ├── Corp       (Dev and Prod subscriptions)
+    │   └── Online     (Dev and Prod subscriptions)
+    ├── Sandbox
+    └── Decommissioned
+```
 
-Complete this main path first, then use the extension roadmap near the end to add identity, security, resilience, and a real application workload.
+Billing placement controls invoice and credit attribution. Management-group placement controls inherited Policy and RBAC. Changing one does not change the other.
 
-## Repository structure
+## Repository map
 
 ```text
 docs/
-  01-ALZ-concepts.md       ALZ, management groups, subscription organization, and Policy
-  02-networking.md         Hub-Spoke, routing, Firewall, hybrid connectivity, and Private DNS
-  03-azure-devops.md       Pipelines, templates, expressions, approvals, and KQL
+  01-ALZ-concepts.md
+  02-networking.md
+  03-azure-devops.md
+  04-subscription-vending.md
+  05-alz-accelerator.md
+
+accelerator/
+  prepare-config.ps1             generate reviewed official local inputs
+  deploy-accelerator.ps1          preview or explicitly run the bootstrap
 
 terraform/
-  10-governance/           Management-group hierarchy, subscription placement, and Policy
-  20-platform/             Hub/Spoke, Private Link, logging, Firewall, and VPN Gateway
-
-azure-devops/              Runnable Azure Pipelines template example
+  subscriptions.tfvars.example   shared role-to-subscription manifest
+  00-bootstrap/                   protected remote state storage
+  10-governance/                  management groups, Policy, RBAC, budgets
+  20-platform/                    resources deployed across role subscriptions
 
 scripts/
-  test-private-dns.sh      Validate Private Endpoint DNS from the test VM
-  show-effective-routes.sh Display the test VM NIC's effective routes
-  destroy-expensive.sh     Remove hourly billed Firewall and Gateway resources
-  nuke-everything.sh       Remove the complete lab
+  create-subscriptions.sh         dry-run-first MCA subscription vending
+  init-backends.sh                initialise separate remote state keys
+  test-private-dns.sh             validate Private Endpoint DNS from Corp Dev
+  show-effective-routes.sh        inspect Corp Dev effective routes
+  destroy-expensive.sh            remove billed session resources
+  nuke-everything.sh              remove platform and governance roots
 ```
-
----
 
 # Part 1: Foundations
 
-Complete this part before deployment. It gives you enough context to understand each resource in the Terraform plan instead of only running commands.
+Read these in order before applying Terraform:
 
-## 1. ALZ and governance foundations
+1. [ALZ concepts and governance](docs/01-ALZ-concepts.md): subscriptions as management boundaries, the management-group hierarchy, Policy effects, and platform ownership.
+2. [Enterprise Azure networking](docs/02-networking.md): Hub-Spoke routing, peering, Firewall, hybrid connectivity, Private Endpoint and DNS.
+3. [Azure DevOps and operations](docs/03-azure-devops.md): Terraform delivery, approvals, workload identity federation, diagnostic settings and KQL.
+4. [Multi-subscription bootstrap and vending](docs/04-subscription-vending.md): MCA billing scope, safe creation order, subscription roles, vending and cost controls.
+5. [Microsoft ALZ IaC Accelerator](docs/05-alz-accelerator.md): official production-oriented bootstrap, AVM/Policy configuration, generated delivery assets, cost review, upgrades and cleanup.
 
-Read [`docs/01-ALZ-concepts.md`](docs/01-ALZ-concepts.md), focusing on:
+Checkpoints before deployment:
 
-- The Tenant, Management Group, Subscription, and Resource Group hierarchy.
-- Platform Landing Zones versus Application Landing Zones.
-- The responsibilities of Platform, Landing Zones, Corp, Online, Sandbox, and Decommissioned.
-- Azure Policy scope, inheritance, exemptions, and the differences between Audit, Deny, and DINE.
-- Why governance normally starts at an intermediate root rather than placing broad controls on the Tenant Root Group.
-
-Checkpoint: given a new workload, determine its subscription and management-group placement and the policies it should inherit.
-
-## 2. Networking foundations
-
-Read [`docs/02-networking.md`](docs/02-networking.md), focusing on:
-
-- Hub-Spoke traffic paths and non-transitive VNet peering.
-- Longest-prefix route selection and UDR, BGP, and system-route precedence.
-- The distinct responsibilities of NSGs, Azure Firewall, and Application Gateway.
-- The relationship between Private Endpoint, Private DNS Zone, VNet Link, and DNS Zone Group.
-- VPN/ExpressRoute gateway transit and the matching remote-gateway peering configuration.
-
-Checkpoint: draw the path from a spoke to the internet, the hub, another spoke, a Private Endpoint, and an on-premises network.
-
-## 3. Operations and automation foundations
-
-Read sections 1–5 of [`docs/03-azure-devops.md`](docs/03-azure-devops.md) and review [`azure-devops/README.md`](azure-devops/README.md), focusing on:
-
-- The Terraform `init`, `validate`, `plan`, `apply`, and `destroy` lifecycle.
-- Azure Pipelines templates, variable groups, service connections, environments, and approvals.
-- Compile-time, runtime, and macro expression evaluation.
-- How Log Analytics, diagnostic settings, and KQL form a basic troubleshooting loop.
-
-Checkpoint: explain why a reviewed Terraform plan should be saved and that same plan applied.
-
----
+- Explain why Billing Profile placement and Management Group placement are independent.
+- Place a new private workload into the correct role subscription and management group.
+- Draw the traffic and DNS path from Corp Dev to the private Storage endpoint.
+- Explain why DINE needs both a managed identity and RBAC.
+- Identify which resources are billed continuously and how they will be removed.
 
 # Part 2: Deployment and validation
 
-## 0. Prepare the environment
+## 0. Prerequisites and safety
 
-### Tools and permissions
+Required locally:
 
-- A dedicated Azure lab subscription. Do not run the lab in a production subscription or company tenant without approval.
-- Azure CLI, Terraform `>= 1.5.0`, Git, and Bash.
-- Permission to deploy resources in the subscription.
-- Tenant-level permission to create management groups, assign management-group Policy, move a subscription, and create role assignments. In an enterprise tenant, an administrator normally grants these rights explicitly. Without them, you can still complete the platform networking portion.
-- Regional quota for Standard_B1s, Azure Firewall, and VpnGw1. Firewall and gateways are optional exercises.
-
-Check local tools:
+- Azure CLI, Terraform `>= 1.5, < 2.0`, Git, and Bash.
+- Permission to create resources and role assignments in the role subscriptions.
+- Tenant permissions for management groups, management-group Policy, and subscription association.
+- MCA invoice-section subscription-creation permission only if the helper will create subscriptions.
 
 ```bash
 az version
 terraform version
-```
-
-Sign in and verify the target subscription:
-
-```bash
 az login
-az account set --subscription "<subscription name or ID>"
 az account show --query '{name:name,id:id,tenantId:tenantId}' --output table
 ```
 
-If deployment reports an unregistered resource provider and you have permission to register it:
+Use a lab tenant or explicitly approved tenant. Never paste a real Billing Scope, subscription manifest, secret, or saved plan into Git. Review current Azure prices and sponsorship eligibility before enabling billed services.
+
+## 1. Prepare the subscriptions
+
+Read [the subscription vending guide](docs/04-subscription-vending.md) first. The safest path is to create only Management, deploy a tiny eligible resource, and verify credit attribution before creating the remaining subscriptions.
+
+Preview the helper without changing Azure:
 
 ```bash
-for namespace in Microsoft.Network Microsoft.Compute Microsoft.Storage \
-  Microsoft.OperationalInsights Microsoft.Insights; do
-  az provider register --namespace "$namespace"
-done
+./scripts/create-subscriptions.sh --role management
 ```
 
-### Cost protection
+If the subscriptions already exist, create the local manifest manually:
 
-Before deployment, create a monthly budget under **Cost Management + Billing -> Budgets**, with notifications such as 50%, 80%, and 100%. Prices vary by region, currency, and agreement, so confirm the current cost with the [Azure Pricing Calculator](https://azure.microsoft.com/pricing/calculator/) before enabling Firewall or gateways.
+```bash
+cp terraform/subscriptions.tfvars.example terraform/subscriptions.tfvars
+```
 
-The default platform configuration creates a B1s test VM, Private Endpoint, and Log Analytics Workspace. `enable_firewall`, `enable_vpn_gateway`, and `enable_simulated_onprem` are all `false` by default.
+Replace all placeholders and verify that all nine IDs are unique. This file is ignored by Git.
 
-## 1. Deploy governance
+## 2. Bootstrap remote Terraform state
+
+The bootstrap root uses local state because it creates the remote state store itself. It places the storage account in Management, disables shared-key authentication, uses Microsoft Entra authentication, enables versioning and soft delete, and creates a private container.
+
+```bash
+cd terraform/00-bootstrap
+cp terraform.tfvars.example terraform.tfvars
+# Set management_subscription_id to the Management subscription.
+
+terraform init
+terraform fmt -check
+terraform validate
+terraform plan -out=tfplan
+terraform apply tfplan
+cd ../..
+
+./scripts/init-backends.sh
+```
+
+Azure RBAC propagation can delay first access to the container. If the role assignment was created successfully but container access is initially denied, wait briefly and apply again.
+
+Do not delete `00-bootstrap` while either remote state file is in use.
+
+## 3. Deploy governance safely
 
 ```bash
 cd terraform/10-governance
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Edit `terraform.tfvars`. At minimum, set `subscription_id` and choose a short `prefix` that is unique in the tenant. Keep these values for the first deployment:
+Use these safe first-run values:
 
 ```hcl
-move_subscription_into_hierarchy = false
-public_ip_policy_effect           = "Audit"
+move_subscriptions_into_hierarchy = false
+public_ip_policy_effect            = "Audit"
 ```
 
-Initialize, validate, and review the plan before applying it:
-
 ```bash
-terraform fmt -check -recursive
-terraform init
+terraform fmt -check
 terraform validate
-terraform plan -out=tfplan
+terraform plan -var-file=../subscriptions.tfvars -out=tfplan
 terraform show tfplan
 terraform apply tfplan
 ```
 
-Check **Management groups** and **Policy** in the Azure portal. Initial management-group service setup and resource visibility can take time.
+Inspect the hierarchy and Policy assignments in the portal before moving any subscription. Management-group and Policy propagation can take time.
 
-## 2. Validate subscription placement and Policy
+To enable per-subscription budgets, set `budget_start_date` to the first day of the current month, configure amounts and contact emails, then review another plan. Budgets alert; they do not stop consumption.
 
-Change the governance `terraform.tfvars` values to:
-
-```hcl
-move_subscription_into_hierarchy = true
-public_ip_policy_effect           = "Deny"
-```
-
-Run `terraform plan -out=tfplan`, review it, and run `terraform apply tfplan`. After Policy propagation and initial evaluation, deliberately attempt to create a VM with a public IP:
-
-```bash
-az group create --name rg-alz-policy-test --location australiaeast
-
-az vm create \
-  --resource-group rg-alz-policy-test \
-  --name vm-should-fail \
-  --image Ubuntu2404 \
-  --public-ip-address pip-policy-test \
-  --generate-ssh-keys
-```
-
-The VM/NIC deployment should be denied. Inspect the Policy assignment and definition IDs in the error, then remove the test resource group:
-
-```bash
-az group delete --name rg-alz-policy-test --yes --no-wait
-```
-
-If deployment succeeds, first confirm that the subscription is under the Corp management group and allow more time for Policy propagation before retrying.
-
-## 3. Deploy the baseline platform
+## 4. Deploy the baseline platform
 
 ```bash
 cd ../20-platform
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Set the same `subscription_id`. Keep all three expensive switches disabled and retain the test VM:
+Keep the expensive features off initially:
 
 ```hcl
 enable_firewall         = false
 enable_vpn_gateway      = false
 enable_simulated_onprem = false
+enable_sentinel         = false
 enable_test_vm          = true
 ```
 
 ```bash
-terraform fmt -check -recursive
-terraform init
+terraform fmt -check
 terraform validate
-terraform plan -out=tfplan
+terraform plan -var-file=../subscriptions.tfvars -out=tfplan
 terraform show tfplan
 terraform apply tfplan
 terraform output
 ```
 
-This creates Hub/Spoke VNets, peering, NSGs, Private DNS, a Storage Private Endpoint, Log Analytics, and a test VM without a public IP.
+The baseline creates Management logging, the Connectivity Hub and Private DNS zone, a Corp Dev spoke and private Storage endpoint, and a private test VM. Cross-subscription peering and DNS links are created with explicit provider aliases.
 
-## 4. Validate routes and Private Endpoint DNS
+## 5. Connect central logging and place subscriptions
 
-Return to the repository root:
+Get the central workspace ID:
 
 ```bash
-cd ../..
+terraform output -raw log_analytics_workspace_id
+```
+
+Set that value as `log_analytics_workspace_id` in `terraform/10-governance/terraform.tfvars`. Review and apply governance again. This enables the DINE Activity Log assignment and its remediation identity.
+
+After checking every ID and target management group, change:
+
+```hcl
+move_subscriptions_into_hierarchy = true
+```
+
+Plan, review, and apply the governance root with `-var-file=../subscriptions.tfvars`. Confirm all nine subscriptions appear in their intended management groups.
+
+## 6. Validate Private DNS and routing
+
+From the repository root:
+
+```bash
 ./scripts/show-effective-routes.sh | tee /tmp/alz-routes-baseline.txt
 ./scripts/test-private-dns.sh
 ```
 
-The expected DNS result is a `privatelink` CNAME followed by an A record for the Private Endpoint in `10.1.1.x`.
+The expected answer is a public Azure CNAME followed by a private `10.1.1.x` A record from `privatelink.blob.core.windows.net`.
 
-Remove the spoke Private DNS Zone Link deliberately and observe the change:
+For a controlled failure exercise, remove only the spoke DNS link, run the test, then restore it:
 
 ```bash
 terraform -chdir=terraform/20-platform destroy \
+  -var-file=../subscriptions.tfvars \
   -target=azurerm_private_dns_zone_virtual_network_link.blob_to_spoke
 
 ./scripts/test-private-dns.sh
-terraform -chdir=terraform/20-platform apply
+
+terraform -chdir=terraform/20-platform apply \
+  -var-file=../subscriptions.tfvars
 ```
 
-Use `-target` only for this controlled failure exercise, not as the normal deployment workflow. Rerun the DNS test after repair.
+Use `-target` only for this exercise.
 
-## 5. Connect governance to logging
+## 7. Mature Policy from Audit to Deny
 
-Retrieve the Log Analytics Workspace resource ID:
+Set `public_ip_policy_effect = "Deny"`, review the governance plan, and apply. After Policy propagation, deliberately attempt a public-IP deployment in Corp Dev, specifying that subscription explicitly:
 
 ```bash
-terraform -chdir=terraform/20-platform output -raw log_analytics_workspace_id
+CORP_DEV=$(terraform -chdir=terraform/20-platform output -raw corp_dev_subscription_id)
+
+az group create --subscription "$CORP_DEV" \
+  --name rg-alz-policy-test --location australiaeast
+
+az vm create --subscription "$CORP_DEV" \
+  --resource-group rg-alz-policy-test \
+  --name vm-should-fail \
+  --image Ubuntu2404 \
+  --public-ip-address pip-policy-test \
+  --generate-ssh-keys
+
+az group delete --subscription "$CORP_DEV" \
+  --name rg-alz-policy-test --yes --no-wait
 ```
 
-Set this value as `log_analytics_workspace_id` in `terraform/10-governance/terraform.tfvars`, then plan and apply the governance root again. This enables the DINE example together with its managed identity and role assignment.
+Inspect the assignment and definition IDs in the denial. If the deployment succeeds, verify subscription placement and wait for Policy propagation before retrying.
 
-In **Policy -> Compliance**, inspect compliance state and observe that existing resources normally require reevaluation or a remediation task before missing configuration is deployed.
+## 8. Run time-boxed paid exercises
 
-## 6. Deploy Azure Firewall and inspect forced tunnelling
+### Firewall and forced tunnelling
 
-Set these values in `terraform/20-platform/terraform.tfvars`:
-
-```hcl
-enable_firewall   = true
-firewall_sku_tier = "Standard"
-```
-
-Plan and apply, then save and compare the new effective routes:
+Set `enable_firewall = true`, plan and apply with the subscription var file, then compare routes:
 
 ```bash
 ./scripts/show-effective-routes.sh | tee /tmp/alz-routes-firewall.txt
 diff -u /tmp/alz-routes-baseline.txt /tmp/alz-routes-firewall.txt
 ```
 
-Test an allowed and a denied egress request:
+Use the KQL in [the operations guide](docs/03-azure-devops.md) to inspect Firewall decisions.
 
-```bash
-RG=$(terraform -chdir=terraform/20-platform output -raw landing_zone_resource_group)
-VM=$(terraform -chdir=terraform/20-platform output -raw test_vm_name)
+### Simulated hybrid connectivity
 
-az vm run-command invoke -g "$RG" -n "$VM" --command-id RunShellScript \
-  --scripts "curl -sS -o /dev/null -w 'github: %{http_code}\n' https://github.com; \
-             curl -sS -m 10 -o /dev/null -w 'reddit: %{http_code}\n' https://www.reddit.com || echo 'reddit: blocked'"
-```
-
-Use the KQL in section 5 of [`docs/03-azure-devops.md`](docs/03-azure-devops.md) to inspect Firewall allow/deny logs. Ingestion can take several minutes.
-
-Immediately remove hourly billed resources, then reset the corresponding value in `terraform.tfvars` to `false`:
-
-```bash
-./scripts/destroy-expensive.sh
-```
-
-## 7. Deploy simulated hybrid connectivity
-
-Confirm that the Firewall has been removed, then set:
+After removing Firewall, enable both gateway switches:
 
 ```hcl
 enable_vpn_gateway      = true
 enable_simulated_onprem = true
 ```
 
-Plan and apply. Gateway deployment can take a significant amount of time. After completion, capture effective routes again:
+Gateway provisioning can take a long time and both gateways are billed while present. Inspect peering gateway transit and effective routes, then remove them immediately.
 
-```bash
-./scripts/show-effective-routes.sh | tee /tmp/alz-routes-gateway.txt
-```
+### Security subscription
 
-Identify routes with a `VirtualNetworkGateway` source and inspect the pairing of `allow_gateway_transit` and `use_remote_gateways` on the Hub/Spoke peerings.
+Set `enable_sentinel = true` only for the Sentinel onboarding exercise. The code creates a separate Security workspace with a daily quota; data connectors and Defender plans are intentionally not enabled automatically.
 
-Remove the gateways immediately after validation:
-
-```bash
-./scripts/destroy-expensive.sh
-```
-
-Reset both gateway switches in `terraform.tfvars` to `false` so a later `terraform apply` does not rebuild them.
-
-## 8. Run the Azure Pipelines example (optional)
-
-Follow [`azure-devops/README.md`](azure-devops/README.md) to create a service connection, variable group, and environment, then run `azure-devops/azure-pipelines.yml`. Verify that:
-
-- Pull requests run Validate and Plan without Apply.
-- Apply on the main branch requires environment approval.
-- Workload identity federation avoids a long-lived client secret.
-- Apply consumes the reviewed plan artifact instead of creating a new plan.
-
-## 9. Stop billing and clean up
-
-Deallocate only the test VM:
-
-```bash
-az vm deallocate --resource-group \
-  "$(terraform -chdir=terraform/20-platform output -raw landing_zone_resource_group)" \
-  --name "$(terraform -chdir=terraform/20-platform output -raw test_vm_name)"
-```
-
-Remove only Firewall and Gateway resources:
+At the end of every paid session:
 
 ```bash
 ./scripts/destroy-expensive.sh
 ```
 
-Remove the entire lab:
+Also keep the switches false in `terraform/20-platform/terraform.tfvars` so the next apply does not recreate the resources.
+
+## 9. Run the delivery pipeline
+
+Follow [the Azure Pipelines lab](azure-devops/README.md). For an enterprise implementation, use workload identity federation, separate plan and apply identities, protected environments, saved plan artifacts, remote state, and a scheduled drift-detection plan.
+
+## 10. Cleanup
 
 ```bash
 ./scripts/nuke-everything.sh
 ```
 
-After cleanup, verify Terraform state, the Azure portal, and resources tagged `lab=true` so nothing billable remains.
+This destroys Platform first and Governance second. It deliberately retains the bootstrap storage and subscriptions. Delete the state store only after both state files are no longer needed; cancel or reuse subscriptions through the billing process rather than treating them as ordinary Terraform resources.
 
----
+# Part 3: Official Accelerator path
 
-## Evidence worth keeping
+After completing the smaller manual implementation, follow the [Microsoft ALZ IaC Accelerator hands-on lab](docs/05-alz-accelerator.md). It adds two guarded PowerShell helpers:
 
-- Effective-route output for baseline, Firewall, and Gateway phases.
-- Private DNS results before link removal, after failure, and after repair.
-- The Policy Deny error with its assignment and definition IDs.
-- Log Analytics results showing Firewall allow/deny decisions.
-- Reviewed Terraform plans and a final topology diagram.
-- A troubleshooting record containing symptom, hypotheses, validation, root cause, and fix.
+```powershell
+# Generate official scenario 5 configuration locally; no Azure resources are created.
+pwsh ./accelerator/prepare-config.ps1 `
+  -ManagementSubscriptionId "<management-subscription-id>" `
+  -ConnectivitySubscriptionId "<connectivity-subscription-id>" `
+  -IdentitySubscriptionId "<identity-subscription-id>" `
+  -SecuritySubscriptionId "<security-subscription-id>" `
+  -DefenderSecurityContact "<security-contact@example.com>" `
+  -ScenarioNumber 5 `
+  -InstallOrUpdateAlzModule
 
-## Extension roadmap
+# Preview only; add -Execute after reviewing every generated file and cost setting.
+pwsh ./accelerator/deploy-accelerator.ps1
+```
 
-1. **Identity and access**: RBAC, custom roles, managed identity, PIM, break-glass accounts, and Conditional Access.
-2. **Secrets and security**: Key Vault Private Endpoint, rotation, Defender for Cloud, and security-baseline Policy.
-3. **Real workload**: App Service, Container Apps, or AKS in an Application Landing Zone, with Application Gateway/WAF.
-4. **Operations and resilience**: Azure Monitor alerts, Action Groups, Update Manager, Backup, Site Recovery, and multi-region design.
-5. **Platform at scale**: multiple subscriptions, subscription vending, remote Terraform state, module versioning, and policy-as-code testing.
+The manual Terraform roots and the Accelerator are separate implementations. Do not let both manage the same hierarchy or resources. The Accelerator guide includes the local workflow, an Azure DevOps exercise, a more complete Hub-Spoke scenario, upgrade discipline and the official two-stage cleanup procedure.
 
-## Known limitations
+## Production gaps and next extensions
 
-- This is a simplified, single-subscription ALZ. A production architecture normally separates platform and application subscriptions.
-- ExpressRoute requires a provider circuit. The lab covers only downstream gateway transit and route propagation.
-- The code passes `terraform fmt`, but AzureRM Provider versions, regional quotas, and tenant policy can still produce `validate` or `plan` differences. Always review the plan before applying it.
-- For production, evaluate Microsoft's ALZ IaC Accelerator, Azure Verified Modules, or official Bicep implementation and tailor it to organizational requirements instead of copying this lab directly.
+The lab is enterprise-shaped, not production-ready. A production program should evaluate:
 
-## Official references
+- Promotion of the [Accelerator exercise](docs/05-alz-accelerator.md) into a reviewed platform repository with pinned versions, release management and environment-specific approvals.
+- Entra groups, PIM, access reviews, break-glass accounts, custom roles, and separation of platform identities.
+- Azure Policy initiatives, assignment archetypes, automated remediation and expiring exemptions.
+- Defender for Cloud, Sentinel data connectors, Key Vault, customer-managed keys and security incident integration.
+- DNS Private Resolver, DDoS Network Protection, multi-region hubs, ExpressRoute, IPAM and network watcher controls.
+- Alert rules, action groups, backup, recovery testing, service health and platform SLOs.
+- A reviewed subscription-vending pipeline with CMDB/IPAM integration and lifecycle decommissioning.
+- Production resilience, quotas, availability zones, data residency, regulatory controls and disaster recovery.
 
-- [What is an Azure landing zone?](https://learn.microsoft.com/azure/cloud-adoption-framework/ready/landing-zone/)
-- [Azure landing zone design areas](https://learn.microsoft.com/azure/cloud-adoption-framework/ready/landing-zone/design-areas)
-- [Authenticate Terraform to Azure](https://learn.microsoft.com/azure/developer/terraform/authenticate-to-azure)
-- [Create a management group](https://learn.microsoft.com/azure/governance/management-groups/create-management-group-portal)
-- [Azure CLI budget commands](https://learn.microsoft.com/cli/azure/consumption/budget)
+Prefer the official [Azure Landing Zone IaC Accelerator](https://azure.github.io/Azure-Landing-Zones/terraform/) when moving from this teaching implementation to an organizational platform.

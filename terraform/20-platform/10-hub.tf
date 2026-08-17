@@ -30,12 +30,16 @@ locals {
 }
 
 resource "azurerm_resource_group" "connectivity" {
+  provider = azurerm.connectivity
+
   name     = "rg-${var.prefix}-connectivity-${var.location}"
   location = var.location
   tags     = var.tags
 }
 
 resource "azurerm_virtual_network" "hub" {
+  provider = azurerm.connectivity
+
   name                = "vnet-${var.prefix}-hub-${var.location}"
   resource_group_name = azurerm_resource_group.connectivity.name
   location            = azurerm_resource_group.connectivity.location
@@ -44,6 +48,8 @@ resource "azurerm_virtual_network" "hub" {
 }
 
 resource "azurerm_subnet" "hub_firewall" {
+  provider = azurerm.connectivity
+
   name                 = "AzureFirewallSubnet"
   resource_group_name  = azurerm_resource_group.connectivity.name
   virtual_network_name = azurerm_virtual_network.hub.name
@@ -51,7 +57,9 @@ resource "azurerm_subnet" "hub_firewall" {
 }
 
 resource "azurerm_subnet" "hub_firewall_mgmt" {
-  count = var.firewall_sku_tier == "Basic" ? 1 : 0
+  provider = azurerm.connectivity
+
+  count = var.enable_firewall && var.firewall_sku_tier == "Basic" ? 1 : 0
 
   name                 = "AzureFirewallManagementSubnet"
   resource_group_name  = azurerm_resource_group.connectivity.name
@@ -60,6 +68,8 @@ resource "azurerm_subnet" "hub_firewall_mgmt" {
 }
 
 resource "azurerm_subnet" "hub_gateway" {
+  provider = azurerm.connectivity
+
   name                 = "GatewaySubnet"
   resource_group_name  = azurerm_resource_group.connectivity.name
   virtual_network_name = azurerm_virtual_network.hub.name
@@ -67,6 +77,8 @@ resource "azurerm_subnet" "hub_gateway" {
 }
 
 resource "azurerm_subnet" "hub_shared" {
+  provider = azurerm.connectivity
+
   name                 = "snet-shared-services"
   resource_group_name  = azurerm_resource_group.connectivity.name
   virtual_network_name = azurerm_virtual_network.hub.name
@@ -87,6 +99,8 @@ resource "azurerm_subnet" "hub_shared" {
 ###############################################################################
 
 resource "azurerm_virtual_network_peering" "hub_to_spoke" {
+  provider = azurerm.connectivity
+
   name                      = "peer-hub-to-corp"
   resource_group_name       = azurerm_resource_group.connectivity.name
   virtual_network_name      = azurerm_virtual_network.hub.name
@@ -102,6 +116,8 @@ resource "azurerm_virtual_network_peering" "hub_to_spoke" {
 }
 
 resource "azurerm_virtual_network_peering" "spoke_to_hub" {
+  provider = azurerm.corp_dev
+
   name                      = "peer-corp-to-hub"
   resource_group_name       = azurerm_resource_group.landing_zone.name
   virtual_network_name      = azurerm_virtual_network.spoke.name

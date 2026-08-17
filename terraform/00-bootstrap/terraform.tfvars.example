@@ -1,0 +1,8 @@
+management_subscription_id = "00000000-0000-0000-0000-000000000001"
+prefix                     = "alzlab"
+location                   = "australiaeast"
+
+# Add your current public IPv4 CIDR after the first successful deployment if
+# you want to close the storage firewall. A moving residential IP may lock you
+# out, so Entra ID authentication is the default control for this lab.
+allowed_ip_cidrs = []

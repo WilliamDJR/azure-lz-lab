@@ -10,12 +10,16 @@
 ###############################################################################
 
 resource "azurerm_resource_group" "management" {
+  provider = azurerm
+
   name     = "rg-${var.prefix}-management-${var.location}"
   location = var.location
   tags     = var.tags
 }
 
 resource "azurerm_log_analytics_workspace" "platform" {
+  provider = azurerm
+
   name                = "log-${var.prefix}-platform-${var.location}"
   resource_group_name = azurerm_resource_group.management.name
   location            = azurerm_resource_group.management.location
@@ -30,7 +34,7 @@ resource "azurerm_log_analytics_workspace" "platform" {
 }
 
 ###############################################################################
-# Test VM  (COST TOGGLE: var.enable_test_vm, ~A$15/month for B1s)
+# Test VM  (COST TOGGLE: var.enable_test_vm)
 #
 # Deliberately has NO public IP and NO Bastion. You drive it with:
 #
@@ -38,8 +42,8 @@ resource "azurerm_log_analytics_workspace" "platform" {
 #     --command-id RunShellScript --scripts "nslookup <storage>.blob.core.windows.net"
 #
 # run-command goes through the Azure control plane and the VM agent, not the
-# data plane, so it works on a fully private VM. This saves ~A$190/month
-# versus deploying Azure Bastion, and it is a genuinely useful trick to know.
+# data plane, so it works on a fully private VM and avoids deploying Bastion
+# solely for this DNS exercise.
 ###############################################################################
 
 resource "random_password" "vm" {
@@ -54,6 +58,8 @@ resource "random_password" "vm" {
 }
 
 resource "azurerm_network_interface" "test_vm" {
+  provider = azurerm.corp_dev
+
   count = var.enable_test_vm ? 1 : 0
 
   name                = "nic-${var.prefix}-testvm"
@@ -71,6 +77,8 @@ resource "azurerm_network_interface" "test_vm" {
 }
 
 resource "azurerm_linux_virtual_machine" "test" {
+  provider = azurerm.corp_dev
+
   count = var.enable_test_vm ? 1 : 0
 
   name                = "vm-${var.prefix}-test"

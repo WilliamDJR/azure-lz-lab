@@ -1,5 +1,7 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.5.0, < 2.0.0"
+
+  backend "azurerm" {}
 
   required_providers {
     azurerm = {
@@ -14,6 +16,6 @@ provider "azurerm" {
   # Management groups live at TENANT scope, but the provider still needs a
   # subscription to authenticate against. This is the #1 gotcha when people
   # first run ALZ code.
-  subscription_id = var.subscription_id
+  subscription_id = var.subscription_ids.management
   features {}
 }

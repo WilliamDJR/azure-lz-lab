@@ -1,4 +1,4 @@
-# 03 · Azure DevOps 速成（给精通 GitHub Actions 的人）
+# 03 · Azure DevOps 与平台交付
 
 [English](03-azure-devops.md)
 
@@ -114,9 +114,9 @@ Jenkins → GitHub Actions 的迁移方法论同样适用于 ADO：
 
 ---
 
-## 5. KQL 速查（Azure Monitor）
+## 5. KQL 示例（Azure Monitor）
 
-从 Cloud Logging 转过来，语法差异不大，但你得能当场写出来：
+从 Cloud Logging 转过来，语法差异不大。下面是几个可直接用于实验的查询：
 
 ```kusto
 // 防火墙拒绝了什么
@@ -189,3 +189,9 @@ policyresources
 1. 能够准确描述和排查 Azure Pipelines，而不只是把它映射成 GitHub Actions 的名称。
 2. 能够安全地维护和治理现有 Azure DevOps 平台。
 3. 能够基于实际依赖、风险和收益评估保留、集成或迁移方案。
+
+## 7. Accelerator 生成的交付体系
+
+`azure-devops/` 中的流水线是精简的教学示例。官方 ALZ IaC Accelerator 可以把 Azure DevOps 仓库、联合身份、Terraform 远程状态和 Platform Landing Zone 交付流水线作为一套系统完成 Bootstrap。
+
+完成本文后继续运行 [05-alz-accelerator_cn.md](05-alz-accelerator_cn.md)。可以比较两套流程的控制点，但不要用教学示例覆盖 Accelerator 生成的仓库；后者应作为平台事实来源，并按官方升级流程持续维护。

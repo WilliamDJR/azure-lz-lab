@@ -25,8 +25,10 @@ open https://dev.azure.com          # 用 Microsoft 账号，免费
 #    ↑ 这一步使用无密钥的工作负载身份联合
 
 # 3. Pipelines → Library → + Variable group
-#    命名 platform-common，加一个 TF_VERSION = 1.9.8
-#    再建一个勾选 "Link secrets from an Azure key vault" 的组，对比感受
+#    命名 platform-common，加入：
+#      TF_VERSION、TF_BACKEND_RESOURCE_GROUP、TF_BACKEND_STORAGE_ACCOUNT、
+#      TF_BACKEND_CONTAINER、TF_BACKEND_KEY、SUBSCRIPTION_IDS_JSON
+#    SUBSCRIPTION_IDS_JSON 是与 terraform/subscriptions.tfvars 对应的 JSON 对象
 
 # 4. Pipelines → Environments → New environment
 #    命名 alz-lab → Approvals and checks → Approvals → 把自己加为审批人
@@ -49,7 +51,9 @@ extends:
 必须用版本号控制爆炸半径。这一点你在 PCCW 做 100+ repo 的共享 workflow 时已经
 这是大型共享流水线仓库中常见的版本和爆炸半径控制问题。
 
-## 你要观察的三件事
+Service Connection 背后的工作负载身份需要在所有 provider alias 使用的订阅中获得对应的最小权限，并拥有状态 Container 的 Blob Data 权限。仅把 Service Connection 作用域设为 Management，并不会自动获得 Connectivity、Security、Corp Dev 或 Sandbox 的权限。
+
+## 三项验证重点
 
 1. **Validate → Plan → Apply 三个 stage 的依赖关系**，以及 Apply 停在审批门前的样子。
    Actions 里 job 之间是 `needs:`，ADO 多了 stage 这一层抽象。
@@ -58,7 +62,7 @@ extends:
 3. **`addSpnToEnvironment: true`** 把联邦凭据暴露成 `$servicePrincipalId` / `$idToken`，
    Terraform 用 `ARM_USE_OIDC` 消费。全流程没有任何 secret 落地。
 
-## 三个必会的排障点
+## 常见排障点
 
 | 症状 | 原因 |
 |---|---|
