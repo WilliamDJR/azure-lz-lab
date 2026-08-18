@@ -328,10 +328,14 @@ This destroys Platform first and Governance second. It deliberately retains the 
 
 # Part 3: Official Accelerator path
 
-After completing the smaller manual implementation, follow the [Microsoft ALZ IaC Accelerator hands-on lab](docs/05-alz-accelerator.md). It adds two guarded PowerShell helpers:
+After completing the smaller manual implementation, clean it up and follow the [Microsoft ALZ IaC Accelerator hands-on lab](docs/05-alz-accelerator.md). The official `Deploy-Accelerator` command is the canonical final path. The repository helpers are optional safety wrappers around the official `New-AcceleratorFolderStructure` and `Deploy-Accelerator` commands:
 
 ```powershell
-# Generate official scenario 5 configuration locally; no Azure resources are created.
+# Canonical final path, after the manual resources have been cleaned up.
+Deploy-Accelerator
+```
+
+```powershell
 pwsh ./accelerator/prepare-config.ps1 `
   -ManagementSubscriptionId "<management-subscription-id>" `
   -ConnectivitySubscriptionId "<connectivity-subscription-id>" `
@@ -345,7 +349,7 @@ pwsh ./accelerator/prepare-config.ps1 `
 pwsh ./accelerator/deploy-accelerator.ps1
 ```
 
-The manual Terraform roots and the Accelerator are separate implementations. Do not let both manage the same hierarchy or resources. The Accelerator guide includes the local workflow, an Azure DevOps exercise, a more complete Hub-Spoke scenario, upgrade discipline and the official two-stage cleanup procedure.
+The manual Terraform roots are the learning phase; the official Accelerator is the final platform phase. Do not let both manage the same hierarchy or resources. The Accelerator guide starts with the cleanup gate, then covers the official local workflow, Azure DevOps exercise, full Hub-Spoke scenario, upgrade discipline and two-stage cleanup procedure.
 
 ## Production gaps and next extensions
 

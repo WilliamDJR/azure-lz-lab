@@ -328,10 +328,14 @@ enable_simulated_onprem = true
 
 # 第三部分：官方 Accelerator 路线
 
-完成小型手工实现后，继续运行 [Microsoft ALZ IaC Accelerator 实操](docs/05-alz-accelerator_cn.md)。仓库增加了两个带保护的 PowerShell 辅助脚本：
+完成小型手工实现并清理后，继续运行 [Microsoft ALZ IaC Accelerator 实操](docs/05-alz-accelerator_cn.md)。官方 `Deploy-Accelerator` 命令才是最终主路径。仓库中的辅助脚本只是对官方 `New-AcceleratorFolderStructure` 和 `Deploy-Accelerator` 的可选安全封装：
 
 ```powershell
-# 只在本地生成官方场景 5 配置，不创建 Azure 资源。
+# 手工资源清理后的最终主路径。
+Deploy-Accelerator
+```
+
+```powershell
 pwsh ./accelerator/prepare-config.ps1 `
   -ManagementSubscriptionId "<management-subscription-id>" `
   -ConnectivitySubscriptionId "<connectivity-subscription-id>" `
@@ -345,7 +349,7 @@ pwsh ./accelerator/prepare-config.ps1 `
 pwsh ./accelerator/deploy-accelerator.ps1
 ```
 
-手工 Terraform Root 与 Accelerator 是两个独立实现，不要让两者管理同一层级或同一批资源。Accelerator 文档包含本地流程、Azure DevOps 实验、较完整的 Hub-Spoke 场景、升级纪律，以及官方的两阶段清理流程。
+手工 Terraform Root 是学习阶段，官方 Accelerator 是最终平台阶段。不要让两者管理同一层级或同一批资源。Accelerator 文档从清理门槛开始，然后说明官方本地流程、Azure DevOps 实验、完整 Hub-Spoke 场景、升级纪律和两阶段清理流程。
 
 ## 与生产环境的差距及后续扩展
 

@@ -2,28 +2,54 @@
 
 [中文版](05-alz-accelerator_cn.md)
 
-This lab adds the official Microsoft ALZ IaC Accelerator as a production-oriented path alongside the repository's smaller teaching implementation. Complete the manual Terraform labs first so that the generated modules, identities, state and pipelines are understandable rather than opaque.
+This is the final production-oriented phase of the lab: clean up the teaching deployment, then build the platform again from a clean boundary with the official Microsoft ALZ IaC Accelerator. It is not a second ALZ implementation. The Azure resources, Terraform starter configuration and delivery assets come from the official ALZ PowerShell module and its AVM-based starter module.
 
-The helper scripts in `accelerator/` are deliberately conservative:
+The manual Terraform roots are retained only for the learning phase. After the transition, the generated official repository and its pipeline become the source of truth.
 
-- `prepare-config.ps1` downloads the current official scenario through the ALZ PowerShell module, fills the four platform subscription IDs, region and security contact, and creates local configuration only.
+The helper scripts in `accelerator/` are optional safety wrappers around the official commands:
+
+- `prepare-config.ps1` calls the official `New-AcceleratorFolderStructure`, fills the four platform subscription IDs, region and security contact, and creates local configuration only.
 - Scenario 5 is the default. It deploys management groups, Policy and management resources without the full connectivity platform.
 - Defender plan policy parameters are set to `Disabled` unless `-EnablePaidDefenderPlans` is explicitly supplied.
-- `deploy-accelerator.ps1` is preview-only unless `-Execute` is supplied. Execution checks the current Azure CLI subscription and requires a typed confirmation.
+- `deploy-accelerator.ps1` calls the official `Deploy-Accelerator`; it is preview-only unless `-Execute` is supplied. Execution checks the current Azure CLI subscription and requires a typed confirmation.
 - Generated work folders are ignored by Git because they can contain tenant-specific configuration and generated state metadata.
 
-These controls reduce accidental deployment; they do not make a deployment free or production-approved.
+They do not replace or fork the official Accelerator. They only add no-overwrite, placeholder, subscription and cost checks around it. These controls reduce accidental deployment; they do not make a deployment free or production-approved.
 
 ## 1. Decide how this relates to the manual lab
 
 | Path | Best use | Ownership and state |
 |---|---|---|
-| `terraform/00-bootstrap`, `10-governance`, `20-platform` | Learn each Azure and Terraform mechanism, run small cost-controlled failure exercises | Maintained by this repository |
-| Official ALZ IaC Accelerator | Practise a Microsoft-supported bootstrap pattern, Azure Verified Modules, ALZ Policy library, workload identities and delivery pipelines | Generated and upgraded through the official ALZ toolchain |
+| `terraform/00-bootstrap`, `10-governance`, `20-platform` | Learning phase: understand each Azure and Terraform mechanism and run cost-controlled failure exercises | Temporary teaching state |
+| Official ALZ IaC Accelerator | Final phase: build and operate the organizational platform with AVM, ALZ Policy, workload identities and delivery pipelines | Official generated repository and pipeline |
 
-Do not apply both implementations to the same management-group hierarchy or adopt the same Azure resources into both Terraform states. If the manual lab is already deployed, either clean it up before reusing the four platform subscriptions, or give the Accelerator a separate parent management group and a separately reviewed set of subscriptions. A subscription can have only one parent management group at a time.
+Do not run both phases against the same management-group hierarchy or adopt the same resources into both Terraform states. The recommended path is a one-way transition: finish the manual exercises, clean them up, and then run the official Accelerator from an empty target folder. A separate parent management group is useful only when you intentionally want a side-by-side comparison; it is not the final migration path.
 
-## 2. Prerequisites
+## 2. Transition gate: clean the teaching deployment first
+
+Before starting the official Accelerator:
+
+1. Finish the manual governance, networking, DNS, Policy and cost exercises, and save the evidence you want to keep.
+2. Run the manual teardown and wait for management-group and resource deletion to complete:
+
+   ```bash
+   ./scripts/nuke-everything.sh
+   ```
+
+3. Verify that the manual Platform resources, Governance resources, management-group placements and Policy assignments are gone. The script deliberately retains the `00-bootstrap` state storage and subscriptions.
+4. Archive the manual state and plan files. Do not point the official Accelerator at the manual backend, and do not let the manual roots run again after the cutover.
+5. Either reuse the now-empty four platform subscriptions, or use fresh ones. If you no longer need the manual bootstrap storage, remove it only after both manual remote state files are safely archived and unused.
+6. From a new empty folder, run the official `Deploy-Accelerator` command below. This is the canonical final implementation for the lab.
+
+The unmodified official entry point is:
+
+```powershell
+Deploy-Accelerator
+```
+
+Choose Terraform and the Platform landing zone starter module in the wizard. The guarded scripts in the next sections are optional when you want a local, cost-controlled configuration review before invoking that same official command.
+
+## 3. Prerequisites
 
 The current official prerequisites require PowerShell 7.4 or later, Azure CLI 2.55 or later, Git, internet access and sufficient tenant/subscription permissions. Run the exercise in a local PowerShell terminal; Azure Cloud Shell is not supported by the Accelerator.
 
@@ -38,7 +64,7 @@ az account show --query '{name:name,id:id,tenantId:tenantId}' --output table
 
 Use these four dedicated platform subscriptions from [the subscription vending lab](04-subscription-vending.md): Management, Connectivity, Identity and Security. This lab uses Management as the bootstrap subscription.
 
-## 3. Stage A: generate a cost-controlled configuration
+## 4. Stage A: generate a cost-controlled configuration
 
 Start with official Terraform scenario 5: management groups, Policy and management resources only. From the repository root, run:
 
@@ -85,7 +111,7 @@ pwsh ./accelerator/deploy-accelerator.ps1 `
 
 The preview validates the folder and placeholders but does not invoke `Deploy-Accelerator`.
 
-## 4. Bootstrap and run the platform deployment
+## 5. Bootstrap and run the platform deployment
 
 Reconfirm the selected subscription, then explicitly execute:
 
@@ -119,7 +145,7 @@ After apply, verify:
 - generated Terraform state and identities are not local developer secrets;
 - a second plan shows no unexplained changes.
 
-## 5. Stage B: enterprise-shaped connectivity
+## 6. Stage B: enterprise-shaped connectivity
 
 Only after scenario 5 is understood and its cleanup has been tested, generate scenario 6 in a separate work folder:
 
@@ -150,7 +176,7 @@ enableAsc
 
 Use the official option guides to disable or resize services correctly; some changes require a library override rather than changing one apparent Boolean. Review the resulting plan and current regional prices. Even with sponsorship credit, set budgets and time-box Firewall, gateways, Bastion, DDoS, Private DNS Resolver, Defender and log ingestion.
 
-## 6. Azure DevOps production exercise
+## 7. Canonical official run and Azure DevOps production exercise
 
 The local scenario teaches the generated artifacts safely. To practise the full enterprise delivery flow, use a new empty target folder and run the official interactive wizard:
 
@@ -164,7 +190,7 @@ The bootstrap can create the repository, federated deployment identities, remote
 
 Do not copy the separate sample under `azure-devops/` over the Accelerator-generated pipeline. Compare them to understand the controls, then treat the generated repository as the source of truth.
 
-## 7. Cleanup rehearsal
+## 8. Cleanup rehearsal
 
 Accelerator cleanup has two distinct phases. First preview removal of the Platform landing zone:
 
@@ -190,7 +216,7 @@ Deploy-Accelerator `
 
 The repository's `scripts/nuke-everything.sh` understands only the manual Terraform roots and must not be used as the Accelerator cleanup procedure. Retain the generated folder until cleanup and evidence capture are complete.
 
-## 8. Change and upgrade discipline
+## 9. Change and upgrade discipline
 
 For each change:
 
