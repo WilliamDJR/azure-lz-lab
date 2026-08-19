@@ -70,6 +70,23 @@ The all-role run reuses an existing alias and writes `terraform/subscriptions.tf
 
 If the subscriptions already exist, do not run the creation helper. Copy `terraform/subscriptions.tfvars.example` to `terraform/subscriptions.tfvars` and enter the IDs manually.
 
+## Sponsorship eligibility is separate from billing placement
+
+A valid MCA Billing Profile and Invoice Section do not guarantee that the signed-in account may purchase another Azure subscription. Subscription creation is an account/offer eligibility decision made by Azure's billing backend.
+
+- In the modernized Azure credits experience, credits are deposited on a Billing Profile and all subscriptions under that profile can use the credits. This does not remove the account's subscription-creation eligibility checks. [Azure sponsorship credits and Billing Profiles](https://learn.microsoft.com/partner-center/benefits/mpn-benefits-azure-cloud)
+- In the legacy sponsorship redemption experience, redeeming the benefit creates a new sponsorship subscription; the credits cannot simply be applied to an existing pay-as-you-go subscription. [Azure credits activation guidance](https://learn.microsoft.com/partner-center/benefits/mpn-benefits-azure-cloud)
+- For Microsoft Customer Agreement accounts purchased directly through Azure.com, Microsoft documents a maximum of five subscriptions and one new subscription per 24-hour period by default; creation also depends on consumption history and individual eligibility. [Multiple-subscription troubleshooting](https://learn.microsoft.com/azure/cost-management-billing/troubleshoot-subscription/create-subscriptions-deploy-resources)
+
+`PurchaseNeedsReview` with `user is not eligible for an Azure account` means that Azure rejected the purchase before a subscription was created. It is not a Terraform, alias-name, or billing-scope syntax problem. Review the account at [aka.ms/AccountReview](https://aka.ms/AccountReview) and open an Azure Billing/Subscription Management support request if the review does not clear the block. Include the billing account, profile, invoice section, tenant ID, timestamp, and the complete error code, but do not share your billing scope publicly.
+
+Until Azure permits another subscription, use one of these lab tracks:
+
+1. **Single-subscription learning track:** keep the existing sponsorship subscription, create the ALZ management-group hierarchy, and place platform/workload resource groups below it. This teaches policy, RBAC, networking, private endpoints, DNS, diagnostics, and Terraform delivery, but it is not an enterprise subscription-isolation boundary.
+2. **True multi-subscription track:** use an account/offer that is eligible to create additional subscriptions, or ask Microsoft to provision/clear the restriction. Only then create the management, connectivity, identity, security, and workload subscriptions and continue with the multi-subscription Terraform and Accelerator exercises.
+
+Do not repeatedly retry `--role all`; the helper now stops with an explicit explanation when Azure returns `PurchaseNeedsReview`.
+
 ## Verify the first subscription before continuing
 
 Do not treat the helper's summary as proof of success unless it contains a real subscription GUID. The `az account alias` command belongs to the Azure CLI `account` extension. The helper installs that extension before command substitution and rejects extension prompts or other text as IDs. The command reference documents the alias resource's `provisioningState` and `properties.subscriptionId` fields. [Azure CLI `az account alias`](https://learn.microsoft.com/cli/azure/account/alias?view=azure-cli-latest)

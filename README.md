@@ -4,6 +4,8 @@
 
 This repository is organized as **foundations first, deployment and validation second**. It builds an enterprise-shaped Azure Landing Zone (ALZ) across multiple subscriptions while keeping expensive services optional and short-lived.
 
+Important billing constraint: an Azure Sponsorship credit balance and permission to create additional subscriptions are separate capabilities. Some sponsorship, promotional, MOSP, or newly created MCA accounts reject a second subscription with `PurchaseNeedsReview`. Read the [subscription vending guide](docs/04-subscription-vending.md) before attempting multi-subscription creation; it includes a single-subscription learning track when the account is not eligible.
+
 The lab is intentionally smaller than a production ALZ, but its boundaries are realistic: billing and governance are separate, platform capabilities have dedicated subscriptions, development and production have separate workload subscriptions, Terraform state is remote, and every Azure CLI operation is subscription-aware.
 
 ## What the lab now covers
@@ -118,7 +120,7 @@ Use a lab tenant or explicitly approved tenant. Never paste a real Billing Scope
 
 ## 1. Prepare the subscriptions
 
-Read [the subscription vending guide](docs/04-subscription-vending.md) first. The safest path is to create only Management, deploy a tiny eligible resource, and verify credit attribution before creating the remaining subscriptions.
+Read [the subscription vending guide](docs/04-subscription-vending.md) first. If Azure permits another subscription, create only Management, deploy a tiny eligible resource, and verify credit attribution before creating the remaining subscriptions. If Azure returns `PurchaseNeedsReview`, stop and use the documented single-subscription track or request an account review.
 
 Preview the helper without changing Azure:
 

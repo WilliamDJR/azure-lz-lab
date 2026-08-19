@@ -70,6 +70,23 @@ export AZURE_BILLING_SCOPE='/providers/Microsoft.Billing/billingAccounts/<accoun
 
 如果订阅已经存在，不要运行创建脚本。把 `terraform/subscriptions.tfvars.example` 复制为 `terraform/subscriptions.tfvars`，然后手工填写 ID。
 
+## Sponsorship 资格与计费归属是两件事
+
+即使 MCA Billing Profile 和 Invoice Section 正确，登录账户也不一定有资格再购买新的 Azure 订阅。是否允许创建订阅，是 Azure 计费后端对账户和 Offer 做出的资格判断。
+
+- 在新版 Azure credits 体验中，额度存放在 Billing Profile 上，该 Profile 下的所有订阅都可以使用额度；但这并不会取消账户的订阅创建资格检查。[Azure sponsorship credits 与 Billing Profile](https://learn.microsoft.com/partner-center/benefits/mpn-benefits-azure-cloud)
+- 在旧版 Sponsorship 兑换流程中，兑换会创建新的 sponsorship 订阅，不能简单地把额度应用到已有的 pay-as-you-go 订阅。[Azure credits 兑换说明](https://learn.microsoft.com/partner-center/benefits/mpn-benefits-azure-cloud)
+- 对于直接从 Azure.com 购买的 Microsoft Customer Agreement，Microsoft 文档说明默认最多五个订阅，通常每天只能创建一个；是否允许继续创建还取决于消费历史和账户个体资格。[多订阅创建故障排查](https://learn.microsoft.com/azure/cost-management-billing/troubleshoot-subscription/create-subscriptions-deploy-resources)
+
+`PurchaseNeedsReview` 和 `user is not eligible for an Azure account` 表示 Azure 在创建订阅之前就拒绝了购买请求。这不是 Terraform、alias 名称或 Billing Scope 格式错误。请先到 [aka.ms/AccountReview](https://aka.ms/AccountReview) 发起账户审核；如果仍被拦截，提交 Azure Billing/Subscription Management 支持请求。准备好 Billing Account、Profile、Invoice Section、Tenant ID、时间戳和完整错误码，但不要公开真实 Billing Scope。
+
+在 Azure 允许创建第二个订阅之前，可以选择以下实验路线：
+
+1. **单订阅学习路线：** 保留现有 Sponsorship 订阅，创建 ALZ 管理组层级，并在同一订阅下划分平台和工作负载资源组。这仍然可以学习 Policy、RBAC、网络、Private Endpoint、DNS、诊断和 Terraform 交付，但不具备企业级订阅隔离边界。
+2. **真实多订阅路线：** 使用明确允许创建额外订阅的账户/Offer，或者请 Microsoft 清除或代为 provision 该限制。只有成功后，才创建 management、connectivity、identity、security 和 workload 订阅，继续多订阅 Terraform 与 Accelerator 实验。
+
+不要反复重试 `--role all`；脚本现在检测到 `PurchaseNeedsReview` 时会直接停止并给出说明。
+
 ## 继续创建其他订阅前先验证
 
 只有当辅助脚本输出真实的订阅 GUID 时，才能把摘要视为成功。`az account alias` 属于 Azure CLI 的 `account` 扩展；辅助脚本现在会在命令替换前安装该扩展，并拒绝把扩展提示或其他文本当成订阅 ID。官方命令参考中，alias 资源的 `provisioningState` 和 `properties.subscriptionId` 是关键字段。[Azure CLI `az account alias`](https://learn.microsoft.com/cli/azure/account/alias?view=azure-cli-latest)

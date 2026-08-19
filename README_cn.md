@@ -4,6 +4,8 @@
 
 本仓库按**先学基础知识，再部署和验证**的顺序组织。它使用多订阅搭建接近企业形态的 Azure Landing Zone（ALZ），同时把昂贵服务设计成可选、限时启用的实验。
 
+重要的计费限制：Azure Sponsorship 额度与创建额外订阅的资格是两项独立能力。某些 Sponsorship、促销、MOSP 或新建 MCA 账户会因 `PurchaseNeedsReview` 拒绝第二个订阅。尝试多订阅前请先阅读[多订阅引导文档](docs/04-subscription-vending_cn.md)；文档也提供账户无资格时的单订阅学习路线。
+
 这不是完整的生产级 ALZ，但边界是按照真实企业方式设计的：计费层级与治理层级分离；平台能力使用独立订阅；开发和生产工作负载分订阅；Terraform 使用远程状态；所有 Azure CLI 操作都显式指定订阅。
 
 ## 当前覆盖范围
@@ -118,7 +120,7 @@ az account show --query '{name:name,id:id,tenantId:tenantId}' --output table
 
 ## 1. 准备订阅
 
-先阅读[多订阅引导文档](docs/04-subscription-vending_cn.md)。最安全的做法是先只创建 Management，部署一个很小且符合条件的资源，验证赞助额度扣减正确后再创建其余订阅。
+先阅读[多订阅引导文档](docs/04-subscription-vending_cn.md)。只有 Azure 允许创建额外订阅时，才先创建 Management，部署一个很小且符合条件的资源，验证赞助额度归属后再创建其余订阅。如果 Azure 返回 `PurchaseNeedsReview`，请停止重试，使用文档中的单订阅路线或申请账户审核。
 
 辅助工具默认不会更改 Azure：
 

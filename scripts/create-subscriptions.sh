@@ -135,6 +135,12 @@ for role in "${selected_roles[@]}"; do
     -o tsv \
     --only-show-errors 2>&1) || {
       echo "$create_output" >&2
+      if [[ "$create_output" == *"PurchaseNeedsReview"* ]]; then
+        echo >&2
+        echo "Azure rejected subscription creation during account/offer eligibility review." >&2
+        echo "This is not a Terraform or billing-scope syntax error. Review the account at https://aka.ms/AccountReview before retrying." >&2
+        echo "Do not run --role all until Azure permits another subscription." >&2
+      fi
       exit 1
     }
 
