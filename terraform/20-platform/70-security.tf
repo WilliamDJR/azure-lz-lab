@@ -13,7 +13,7 @@ resource "azurerm_resource_group" "security" {
 
   name     = "rg-${var.prefix}-security-${var.location}"
   location = var.location
-  tags     = var.tags
+  tags     = local.role_tags.security
 }
 
 resource "azurerm_log_analytics_workspace" "security" {
@@ -26,7 +26,7 @@ resource "azurerm_log_analytics_workspace" "security" {
   sku                 = "PerGB2018"
   retention_in_days   = var.log_retention_days
   daily_quota_gb      = 1
-  tags                = var.tags
+  tags                = local.role_tags.security
 }
 
 resource "azurerm_sentinel_log_analytics_workspace_onboarding" "security" {

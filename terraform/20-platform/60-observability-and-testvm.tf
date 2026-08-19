@@ -14,7 +14,7 @@ resource "azurerm_resource_group" "management" {
 
   name     = "rg-${var.prefix}-management-${var.location}"
   location = var.location
-  tags     = var.tags
+  tags     = local.role_tags.management
 }
 
 resource "azurerm_log_analytics_workspace" "platform" {
@@ -30,7 +30,7 @@ resource "azurerm_log_analytics_workspace" "platform" {
   # month of credit overnight.
   daily_quota_gb = 1
 
-  tags = var.tags
+  tags = local.role_tags.management
 }
 
 ###############################################################################
@@ -65,7 +65,7 @@ resource "azurerm_network_interface" "test_vm" {
   name                = "nic-${var.prefix}-testvm"
   resource_group_name = azurerm_resource_group.landing_zone.name
   location            = azurerm_resource_group.landing_zone.location
-  tags                = var.tags
+  tags                = local.role_tags.corp_dev
 
   ip_configuration {
     name                          = "internal"
@@ -87,7 +87,7 @@ resource "azurerm_linux_virtual_machine" "test" {
   size                = "Standard_B1s"
   admin_username      = "azureuser"
   admin_password      = random_password.vm[0].result
-  tags                = var.tags
+  tags                = local.role_tags.corp_dev
 
   disable_password_authentication = false
   network_interface_ids           = [azurerm_network_interface.test_vm[0].id]

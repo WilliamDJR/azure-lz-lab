@@ -6,6 +6,37 @@ set -euo pipefail
 ROOT="$(dirname "$0")/.."
 TF=${TF:-terraform}
 BOOTSTRAP="$ROOT/terraform/00-bootstrap"
+MODE="multi"
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/init-backends.sh [--mode multi|single]
+
+The modes use different backend keys so a single-subscription deployment is
+never silently repointed at the multi-subscription Terraform state.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "--mode requires multi or single" >&2
+        exit 2
+      fi
+      MODE="$2"
+      shift 2
+      ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+case "$MODE" in
+  multi) STATE_SUFFIX="" ;;
+  single) STATE_SUFFIX="-single" ;;
+  *) echo "--mode must be multi or single" >&2; exit 2 ;;
+esac
 
 resource_group=$($TF -chdir="$BOOTSTRAP" output -raw state_resource_group_name)
 storage_account=$($TF -chdir="$BOOTSTRAP" output -raw state_storage_account_name)
@@ -23,7 +54,7 @@ init_root() {
     -backend-config="use_azuread_auth=true"
 }
 
-init_root "$ROOT/terraform/10-governance" "10-governance.tfstate"
-init_root "$ROOT/terraform/20-platform" "20-platform.tfstate"
+init_root "$ROOT/terraform/10-governance" "10-governance${STATE_SUFFIX}.tfstate"
+init_root "$ROOT/terraform/20-platform" "20-platform${STATE_SUFFIX}.tfstate"
 
-echo "Remote backends initialised with separate state keys."
+echo "Remote backends initialised for $MODE mode with separate state keys."

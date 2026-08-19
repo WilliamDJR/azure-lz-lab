@@ -1,5 +1,5 @@
 ###############################################################################
-# Private Endpoint + Private DNS  (essentially free - leave this running)
+# Private Endpoint + Private DNS  (low baseline cost, but not free)
 #
 # This is the highest-value, lowest-cost part of the lab. Private Endpoint DNS
 # is a common Azure enterprise networking failure, so this lab makes the
@@ -41,7 +41,7 @@ resource "random_string" "sa_suffix" {
 resource "azurerm_storage_account" "private" {
   provider = azurerm.corp_dev
 
-  name                = "st${var.prefix}pe${random_string.sa_suffix.result}"
+  name                = "st${replace(var.prefix, "-", "")}pe${random_string.sa_suffix.result}"
   resource_group_name = azurerm_resource_group.landing_zone.name
   location            = azurerm_resource_group.landing_zone.location
 
@@ -55,7 +55,7 @@ resource "azurerm_storage_account" "private" {
   allow_nested_items_to_be_public = false
   min_tls_version                 = "TLS1_2"
 
-  tags = var.tags
+  tags = local.role_tags.corp_dev
 }
 
 # The private DNS zone name is NOT arbitrary. Each PaaS service has a specific
@@ -69,7 +69,7 @@ resource "azurerm_private_dns_zone" "blob" {
 
   name                = "privatelink.blob.core.windows.net"
   resource_group_name = azurerm_resource_group.connectivity.name
-  tags                = var.tags
+  tags                = local.role_tags.connectivity
 }
 
 # Link the zone to the SPOKE so workloads there resolve privately.
@@ -81,7 +81,7 @@ resource "azurerm_private_dns_zone_virtual_network_link" "blob_to_spoke" {
   private_dns_zone_name = azurerm_private_dns_zone.blob.name
   virtual_network_id    = azurerm_virtual_network.spoke.id
   registration_enabled  = false
-  tags                  = var.tags
+  tags                  = local.role_tags.connectivity
 }
 
 # ...and to the HUB, so anything in the hub (and, once the firewall DNS proxy
@@ -94,7 +94,7 @@ resource "azurerm_private_dns_zone_virtual_network_link" "blob_to_hub" {
   private_dns_zone_name = azurerm_private_dns_zone.blob.name
   virtual_network_id    = azurerm_virtual_network.hub.id
   registration_enabled  = false
-  tags                  = var.tags
+  tags                  = local.role_tags.connectivity
 }
 
 resource "azurerm_private_endpoint" "blob" {
@@ -104,7 +104,7 @@ resource "azurerm_private_endpoint" "blob" {
   resource_group_name = azurerm_resource_group.landing_zone.name
   location            = azurerm_resource_group.landing_zone.location
   subnet_id           = azurerm_subnet.private_link.id
-  tags                = var.tags
+  tags                = local.role_tags.corp_dev
 
   private_service_connection {
     name                           = "psc-blob"

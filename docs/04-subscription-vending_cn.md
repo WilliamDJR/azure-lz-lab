@@ -4,6 +4,8 @@
 
 本实验把 Azure 的计费归属与 ALZ 治理归属分开处理。两者有关联，但任何一套层级都不会自动配置另一套。
 
+本章保留企业多订阅路线。如果创建订阅返回 `PurchaseNeedsReview`，不要把重复 ID 填入自动交付命令，也不要持续重试。请转到独立的[单订阅能力实验](05-single-subscription_cn.md)；只有 Azure 后续批准额外订阅后，才返回本章继续。
+
 ## 两套彼此独立的层级
 
 ```text
@@ -21,6 +23,7 @@ Billing Account                           Tenant Root Group
 - **Management Group** 决定继承的 Azure Policy 和 RBAC。
 - 在正确的 Invoice Section 下创建订阅，并不会自动把它放入 ALZ 管理组。
 - 在管理组之间移动订阅，也不会改变它的计费归属。
+- 管理组只能包含子管理组和订阅。资源组始终位于订阅内，不能直接放入不同的管理组分支。
 
 ## 本实验采用的订阅模型
 
@@ -82,8 +85,8 @@ export AZURE_BILLING_SCOPE='/providers/Microsoft.Billing/billingAccounts/<accoun
 
 在 Azure 允许创建第二个订阅之前，可以选择以下实验路线：
 
-1. **单订阅学习路线：** 保留现有 Sponsorship 订阅，创建 ALZ 管理组层级，并在同一订阅下划分平台和工作负载资源组。这仍然可以学习 Policy、RBAC、网络、Private Endpoint、DNS、诊断和 Terraform 交付，但不具备企业级订阅隔离边界。
-2. **真实多订阅路线：** 使用明确允许创建额外订阅的账户/Offer，或者请 Microsoft 清除或代为 provision 该限制。只有成功后，才创建 management、connectivity、identity、security 和 workload 订阅，继续多订阅 Terraform 与 Accelerator 实验。
+1. **单订阅学习路线：** 保留现有 Sponsorship 订阅，创建 ALZ 管理组层级，把唯一订阅按需放入一个经过审查的分支，并通过资源组和标签区分逻辑平台/工作负载角色。按照完整的[单订阅能力实验](05-single-subscription_cn.md)执行。它不具备企业级订阅隔离边界。
+2. **真实多订阅路线：** 使用明确允许创建额外订阅的账户/Offer，或者请 Microsoft 清除或代为 provision 该限制。只有成功后，才创建 management、connectivity、identity、security 和 workload 订阅，继续多订阅 Terraform 路线。清理教学部署后，再进入[官方 Accelerator 实验](06-alz-accelerator_cn.md)。
 
 不要反复重试 `--role all`；脚本现在检测到 `PurchaseNeedsReview` 时会直接停止并给出说明。
 

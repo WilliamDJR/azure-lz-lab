@@ -3,7 +3,7 @@
 ###############################################################################
 
 variable "subscription_ids" {
-  description = "Existing Azure subscription IDs mapped to their ALZ roles."
+  description = "Existing Azure subscription IDs mapped to their ALZ roles. In single-subscription mode, the same ID may be repeated when allow_shared_subscription_ids is true."
   type = object({
     management   = string
     connectivity = string
@@ -20,15 +20,26 @@ variable "subscription_ids" {
     condition = alltrue([
       for subscription_id in values(var.subscription_ids) :
       can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", subscription_id))
-    ]) && length(distinct(values(var.subscription_ids))) == length(values(var.subscription_ids))
-    error_message = "Every subscription ID must be a GUID and each ALZ role must use a different subscription."
+    ])
+    error_message = "Every subscription ID must be a GUID."
   }
+}
+
+variable "allow_shared_subscription_ids" {
+  description = "Permit all ALZ role keys to reference one existing subscription for the single-subscription learning track. Keep false for enterprise subscription isolation."
+  type        = bool
+  default     = false
 }
 
 variable "prefix" {
   description = "Short prefix used in every resource name."
   type        = string
   default     = "alz"
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]{2,10}$", var.prefix))
+    error_message = "prefix must be 2-10 lowercase alphanumeric/hyphen characters."
+  }
 }
 
 variable "location" {
@@ -78,7 +89,7 @@ variable "onprem_address_space" {
 # Cost toggles
 #
 # Every switch below turns on something that bills by the hour. Default is OFF.
-# Read docs/COSTS.md before flipping any of them, and run
+# Review current Azure pricing before flipping any of them, and run
 # scripts/destroy-expensive.sh when you finish a session.
 ###############################################################################
 

@@ -4,6 +4,10 @@
 prefix          = "alzlab"
 location        = "australiaeast"
 
+# Keep false for the enterprise multi-subscription topology. Set true only
+# when using subscriptions.single.tfvars for the documented fallback track.
+allow_shared_subscription_ids = false
+
 # ---------------------------------------------------------------------------
 # Cost toggles. Everything below bills by the hour while it exists.
 # The VM, Private Endpoint and log ingestion can still incur baseline charges.

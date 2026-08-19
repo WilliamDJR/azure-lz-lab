@@ -27,8 +27,12 @@ open https://dev.azure.com          # 用 Microsoft 账号，免费
 # 3. Pipelines → Library → + Variable group
 #    命名 platform-common，加入：
 #      TF_VERSION、TF_BACKEND_RESOURCE_GROUP、TF_BACKEND_STORAGE_ACCOUNT、
-#      TF_BACKEND_CONTAINER、TF_BACKEND_KEY、SUBSCRIPTION_IDS_JSON
+#      TF_BACKEND_CONTAINER、TF_BACKEND_KEY、SUBSCRIPTION_IDS_JSON、
+#      ALLOW_SHARED_SUBSCRIPTION_IDS
 #    SUBSCRIPTION_IDS_JSON 是与 terraform/subscriptions.tfvars 对应的 JSON 对象
+#    多订阅模式使用 false；只有文档中的单订阅路线才使用 true
+#    单订阅模式按 Root 使用 10-governance-single.tfstate 或
+#    20-platform-single.tfstate
 
 # 4. Pipelines → Environments → New environment
 #    命名 alz-lab → Approvals and checks → Approvals → 把自己加为审批人
@@ -47,11 +51,12 @@ extends:
     ...
 ```
 
-但**要理解为什么生产环境要分仓库并打 tag**：模板改一次会同时影响所有消费方，
-必须用版本号控制爆炸半径。这一点你在 PCCW 做 100+ repo 的共享 workflow 时已经
-这是大型共享流水线仓库中常见的版本和爆炸半径控制问题。
+生产环境通常会把共享模板放在独立仓库并固定到版本 tag：模板改一次可能同时影响
+所有消费方，必须通过版本号控制变更的爆炸半径。
 
 Service Connection 背后的工作负载身份需要在所有 provider alias 使用的订阅中获得对应的最小权限，并拥有状态 Container 的 Blob Data 权限。仅把 Service Connection 作用域设为 Management，并不会自动获得 Connectivity、Security、Corp Dev 或 Sandbox 的权限。
+
+单订阅与多订阅运行，以及 Governance 与 Platform Root，绝不能共用同一个 `TF_BACKEND_KEY`。独立 Key 可以防止一个模拟布局覆盖另一个 Root 的 State。
 
 ## 三项验证重点
 

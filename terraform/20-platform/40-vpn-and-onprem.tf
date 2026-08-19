@@ -25,7 +25,7 @@ resource "azurerm_public_ip" "vpn_gateway" {
   location            = azurerm_resource_group.connectivity.location
   allocation_method   = "Static"
   sku                 = "Standard"
-  tags                = var.tags
+  tags                = local.role_tags.connectivity
 }
 
 resource "azurerm_virtual_network_gateway" "hub" {
@@ -43,7 +43,7 @@ resource "azurerm_virtual_network_gateway" "hub" {
 
   active_active = false
   bgp_enabled   = false
-  tags          = var.tags
+  tags          = local.role_tags.connectivity
 
   ip_configuration {
     name                          = "vnetGatewayConfig"
@@ -68,7 +68,7 @@ resource "azurerm_resource_group" "onprem" {
 
   name     = "rg-${var.prefix}-simulated-onprem-${var.location}"
   location = var.location
-  tags     = merge(var.tags, { role = "simulated-onprem" })
+  tags     = merge(local.role_tags.sandbox, { role = "simulated-onprem" })
 }
 
 resource "azurerm_virtual_network" "onprem" {
@@ -80,7 +80,7 @@ resource "azurerm_virtual_network" "onprem" {
   resource_group_name = azurerm_resource_group.onprem[0].name
   location            = azurerm_resource_group.onprem[0].location
   address_space       = [var.onprem_address_space]
-  tags                = var.tags
+  tags                = local.role_tags.sandbox
 }
 
 resource "azurerm_subnet" "onprem_gateway" {
@@ -115,7 +115,7 @@ resource "azurerm_public_ip" "onprem_gateway" {
   location            = azurerm_resource_group.onprem[0].location
   allocation_method   = "Static"
   sku                 = "Standard"
-  tags                = var.tags
+  tags                = local.role_tags.sandbox
 }
 
 resource "azurerm_virtual_network_gateway" "onprem" {
@@ -130,7 +130,7 @@ resource "azurerm_virtual_network_gateway" "onprem" {
   type     = "Vpn"
   vpn_type = "RouteBased"
   sku      = "VpnGw1"
-  tags     = var.tags
+  tags     = local.role_tags.sandbox
 
   ip_configuration {
     name                          = "vnetGatewayConfig"
@@ -155,7 +155,7 @@ resource "azurerm_virtual_network_gateway_connection" "hub_to_onprem" {
   virtual_network_gateway_id      = azurerm_virtual_network_gateway.hub[0].id
   peer_virtual_network_gateway_id = azurerm_virtual_network_gateway.onprem[0].id
   shared_key                      = var.vpn_shared_key
-  tags                            = var.tags
+  tags                            = local.role_tags.connectivity
 }
 
 resource "azurerm_virtual_network_gateway_connection" "onprem_to_hub" {
@@ -171,5 +171,5 @@ resource "azurerm_virtual_network_gateway_connection" "onprem_to_hub" {
   virtual_network_gateway_id      = azurerm_virtual_network_gateway.onprem[0].id
   peer_virtual_network_gateway_id = azurerm_virtual_network_gateway.hub[0].id
   shared_key                      = var.vpn_shared_key
-  tags                            = var.tags
+  tags                            = local.role_tags.sandbox
 }

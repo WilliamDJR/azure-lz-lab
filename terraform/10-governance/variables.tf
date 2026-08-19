@@ -1,5 +1,5 @@
 variable "subscription_ids" {
-  description = "Existing Azure subscription IDs mapped to their ALZ roles."
+  description = "Existing Azure subscription IDs mapped to their ALZ roles. In single-subscription mode, the same ID may be repeated when allow_shared_subscription_ids is true."
   type = object({
     management   = string
     connectivity = string
@@ -16,8 +16,25 @@ variable "subscription_ids" {
     condition = alltrue([
       for subscription_id in values(var.subscription_ids) :
       can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", subscription_id))
-    ]) && length(distinct(values(var.subscription_ids))) == length(values(var.subscription_ids))
-    error_message = "Every subscription ID must look like a GUID and each ALZ role must use a different subscription."
+    ])
+    error_message = "Every subscription ID must look like a GUID."
+  }
+}
+
+variable "allow_shared_subscription_ids" {
+  description = "Permit all ALZ role keys to reference one existing subscription for the single-subscription learning track. Keep false for enterprise subscription isolation."
+  type        = bool
+  default     = false
+}
+
+variable "single_subscription_management_group_key" {
+  description = "Management group that owns the one subscription in the single-subscription learning track. Changing it moves the whole subscription and every resource inside it."
+  type        = string
+  default     = "corp"
+
+  validation {
+    condition     = contains(["management", "connectivity", "identity", "security", "corp", "online", "sandbox"], var.single_subscription_management_group_key)
+    error_message = "single_subscription_management_group_key must be one of: management, connectivity, identity, security, corp, online, sandbox."
   }
 }
 
@@ -44,6 +61,12 @@ variable "allowed_locations" {
   default     = ["australiaeast", "australiasoutheast", "global"]
 }
 
+variable "enforce_allowed_locations_policy" {
+  description = "Enforce the Allowed Locations Deny policy. Keep false until every existing resource and deployment region in the target subscription has been inventoried."
+  type        = bool
+  default     = false
+}
+
 variable "move_subscriptions_into_hierarchy" {
   description = "Associate all role subscriptions with their target ALZ management groups. Keep false until the hierarchy and permissions have been reviewed."
   type        = bool
@@ -68,7 +91,7 @@ variable "default_monthly_budget" {
 }
 
 variable "monthly_budget_overrides" {
-  description = "Optional monthly budget amounts keyed by subscription role."
+  description = "Optional monthly budget amounts keyed by subscription role. In single-subscription mode the one shared budget explicitly uses the management override."
   type        = map(number)
   default     = {}
 }

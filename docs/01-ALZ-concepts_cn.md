@@ -2,299 +2,229 @@
 
 [English](01-ALZ-concepts.md)
 
-> 目标：读完这一篇，你能理解 ALZ 的核心结构，并知道每个概念在 GCP 里对应什么。
-> 预计阅读时间 30 分钟。配合 `terraform/10-governance/` 一起看。
+本章说明 Azure Landing Zone（ALZ）模型，映射相关 GCP 概念，并把设计决策对应到 `terraform/10-governance/`。
 
 ---
 
-## 一句话定义
+## 定义
 
-**Azure Landing Zone (ALZ) 是在跑任何业务负载之前，用代码预置好的一整套租户级底座**——组织结构、身份、网络、策略护栏、监控、计费全部就位，之后每个应用团队拿到的是一个"已经被治理好的订阅"，而不是一张白纸。
+**Azure Landing Zone 是在工作负载部署前建立的、租户规模且由代码定义的基础环境。** 它预先准备资源组织、身份、网络拓扑、Policy 护栏、监控和计费结构，使应用团队获得的是受治理的订阅，而不是空白订阅。
 
-它是微软 **Cloud Adoption Framework (CAF)** 的 "Ready" 阶段产物。
+ALZ 属于 Microsoft Cloud Adoption Framework（CAF）的 **Ready** 阶段。
 
-**最关键的认知转变**：landing zone 不是"一个网络"。它是**一个预先治理好的订阅（a pre-governed subscription）**。网络只是它八个设计域里的一个。把 ALZ 等同于 hub-spoke 是最典型的理解偏差。
+Landing Zone 不只是网络。更准确的理解是一个**预先治理的订阅**；网络只是使订阅能够安全承载工作负载的多个设计领域之一。
 
----
+## GCP 与 Azure 概念映射
 
-## 与 GCP 的概念映射
-
-你在 GCP 上接触过的许多平台概念，在 Azure 里都有对应物。对照这些概念，可以更快理解 Azure 的边界和机制差异。
-
-| 你熟悉的 GCP | Azure 对应 | 关键差异 |
+| GCP 概念 | Azure 对应项 | 重要差异 |
 |---|---|---|
-| Organization | Tenant Root Group（Entra 租户） | Azure 的租户边界是**身份**边界，不是资源边界 |
-| Folder | **Management Group**（最多 6 层，不含租户根） | 可以嵌套，策略沿层级继承 |
-| Project | **Subscription** | 订阅同时是**计费边界**和**配额边界**，比 project 更"重"，不能随便开几百个 |
-| — | **Resource Group** | GCP 没有这一层。RG 是部署/生命周期/RBAC 的单位，同一 RG 的资源通常一起生死 |
-| Organization Policy | **Azure Policy**（+ Initiative 策略集） | Azure Policy 强得多：除了 Deny/Audit，还能 **deployIfNotExists / modify** 自动修复 |
-| IAM Policy binding | **Azure RBAC**（role assignment） | 作用域是 MG / Sub / RG / Resource 四级，向下继承 |
-| — | **Microsoft Entra ID** | 身份平面和资源平面是**分开**的。Entra 角色（Global Admin）≠ Azure RBAC 角色（Owner）。这是最容易混淆的点 |
-| Shared VPC | **没有等价物** → 用 Hub-Spoke VNet peering 代替 | 这就是 hub-spoke 存在的根本原因 |
-| VPC Peering | VNet Peering | 同样**不传递** |
-| Cloud Interconnect / Partner Interconnect | **ExpressRoute** | 通过连接服务商接入 Microsoft 骨干网 |
+| Organization | Microsoft Entra 租户中的 Tenant Root Group | 租户首先是身份边界 |
+| Folder | **Management Group** | 支持嵌套层级，并向下继承 Policy 与 RBAC |
+| Project | **Subscription** | 同时是计费、配额和资源边界 |
+| 无直接对应项 | **Resource Group** | 相关资源的部署、生命周期和 RBAC 作用域 |
+| Organization Policy | **Azure Policy** 与 Initiative | 可以 Audit、Deny、Modify 或部署缺失配置 |
+| IAM policy binding | **Azure RBAC** Role Assignment | 作用域可以是管理组、订阅、资源组或资源 |
+| 无直接对应项 | **Microsoft Entra ID** | Entra 目录角色与 Azure 资源角色属于不同授权平面 |
+| Shared VPC | 无直接对应项；通常使用 Hub-Spoke 和 VNet Peering | 这是 Azure 采用 Hub-Spoke 的重要原因之一 |
+| VPC Peering | VNet Peering | 不具备传递性 |
+| Cloud Interconnect | **ExpressRoute** | 通过服务提供商私下接入 Microsoft 骨干网 |
 | Cloud VPN | VPN Gateway | |
-| Private Service Connect | **Private Endpoint / Private Link** | Azure 版本强依赖 DNS 覆写，坑全在 DNS |
-| Cloud Logging + Monitoring | **Azure Monitor**（Log Analytics workspace + KQL） | 查询语言是 KQL |
-| Cloud Asset Inventory | Azure Resource Graph（也是 KQL） | |
-| Terraform on GCP | Terraform on Azure / **Bicep** | Bicep 是 ARM JSON 的人类可读层，微软原生 |
+| Private Service Connect | **Private Endpoint / Private Link** | Azure 方案高度依赖 Private DNS 覆写 |
+| Cloud Logging and Monitoring | **Azure Monitor**、Log Analytics 与 KQL | KQL 是主要查询语言 |
+| Cloud Asset Inventory | Azure Resource Graph | 同样使用 KQL 查询 |
+| GCP 上的 Terraform | Azure 上的 Terraform 或 **Bicep** | Bicep 是 ARM 上的 Azure 原生声明式语言 |
 
----
+## 参考管理组层级
 
-## 标准管理组层级
-
-```
-Tenant Root Group                        ← 永远不要在这里挂 policy
-└── ALZ  (intermediate root)             ← 所有 policy 挂在这里
-    ├── Platform                         ← 平台团队自己的订阅
-    │   ├── Identity                     ← 域控 / Entra Connect / 域加入
-    │   ├── Management                   ← Log Analytics / 备份 / 自动化
-    │   ├── Connectivity                 ← hub VNet / ExpressRoute / Firewall / 私有 DNS
-    │   └── Security                     ← Sentinel / SOC 管理的安全服务
-    ├── Landing Zones                    ← 交付给业务团队的订阅
-    │   ├── Corp                         ← 需要私网回连本地的负载
-    │   └── Online                       ← 纯互联网面向的负载
-    ├── Sandbox                          ← 故意放松策略，代价是没有企业网连接
-    └── Decommissioned                   ← 待下线订阅的停车场
+```text
+Tenant Root Group                         <- 避免在此分配宽泛 Policy
+└── ALZ（中间根）                         <- 可控的 ALZ Policy 作用域
+    ├── Platform                          <- 共享平台订阅
+    │   ├── Identity                      <- AD DS / 同步 / 域服务
+    │   ├── Management                    <- 监控 / 备份 / 自动化
+    │   ├── Connectivity                  <- Hub / Gateway / Firewall / DNS
+    │   └── Security                      <- Sentinel / SOC 所有的服务
+    ├── Landing Zones                     <- 应用订阅
+    │   ├── Corp                          <- 需要企业私网连接的工作负载
+    │   └── Online                        <- 面向互联网的工作负载
+    ├── Sandbox                           <- 放宽 Policy，不连接企业网络
+    └── Decommissioned                    <- 正在退役的订阅
 ```
 
-**五个关键设计决策：**
+### 层级背后的五项设计决策
 
-1. **为什么要有 intermediate root（`ALZ` 这一层）？**
-   Tenant Root Group 删不掉、改不动，而且租户里**所有**订阅都在它下面，包括你不拥有的。在它上面挂 Deny 策略，出事没有回滚路径。中间根给你一个可以整体删除、可以并行搭建新版本的作用域。
+1. **中间根：** Tenant Root Group 对整个租户生效且不能删除。在该层分配 Deny 可能影响平台团队不负责的订阅，并且难以回滚。中间根提供可管理生命周期的 ALZ 边界，也允许并行建立不同版本的层级。
+2. **分离 Corp 与 Online：** 两类工作负载需要不同护栏。Corp 通常具有企业私网连接并禁止直接公网 IP；Online 原本就需要互联网入口。拆分依据是 Policy 要求，而不是组织架构图。
+3. **Sandbox 位于 Landing Zones 之外：** 工程师需要受控实验空间。该分支以放宽 Policy 换取不连接企业网络。
+4. **拆分 Platform 订阅：** 订阅是配额、计费和访问边界。Connectivity 成本可以集中分摊；Identity 与网络变更具有不同故障半径；工作负载订阅不可用时，监控能力仍应可访问。
+5. **独立 Security 边界：** 安全运营通常需要不同于平台运维的访问边界。独立订阅使 SOC 可以管理 Sentinel 和相关控制，而不必获得 Management 或 Connectivity 的广泛写权限。
 
-2. **为什么 Corp 和 Online 要分开？**
-   因为策略不同。Corp 负载有回本地的私网通路，所以**禁止公网 IP**——否则就绕过了企业边界，形成一条"意外的桥"。Online 负载本来就该有公网 IP。这个策略差异就是拆分的全部理由。`terraform/10-governance/main.tf` 里那条自定义策略只挂在 Corp 上，就是这个原因。
+## Platform 订阅资源归位
 
-3. **为什么 Sandbox 挂在 Landing Zones 外面？**
-   工程师需要一个能乱试的地方，否则他们会去申请例外，最后策略形同虚设。Sandbox 用**放松策略 + 零企业网连接**做交换。这是一个务实的权衡，不是疏漏。
+### Identity 订阅不等于 Microsoft Entra ID
 
-4. **为什么 Platform 要拆成三个订阅？**
-   订阅是配额和计费边界。连接性资源（ExpressRoute circuit、Firewall）的成本要能单独摊销给整个组织；身份资源的变更节奏和爆炸半径与网络完全不同；管理订阅要在其他一切都挂掉时还能查日志。分开也让 RBAC 更干净——网络工程师不需要碰域控。
+**Entra ID 不属于任何订阅。** 它是身份平面的租户级服务。Identity 订阅按需承载支撑设施：
 
-5. **为什么增加 Security 订阅？**
-   安全运营与平台运维经常需要不同的访问边界。独立订阅让 SOC 管理 Sentinel 及相关服务，而不需要获得 Management 或 Connectivity 的广泛写权限。
+- AD DS 域控制器 VM
+- Entra Connect 或 Cloud Sync 服务器
+- Microsoft Entra Domain Services
+- 用于遗留联合身份和 PKI 的 AD FS 或 AD CS
+- 配套 DNS 服务
 
----
-
-## Platform 三个订阅到底装什么 + 资源归属判断法则
-
-### Identity 订阅 ≠ Entra ID
-
-**Entra ID 不住在任何订阅里。** 它是租户级服务，和订阅是两个平面——这就是"身份平面 ≠ 资源平面"的具体体现。你不会在某个订阅里"找到" Entra ID。
-
-Identity 订阅装的是**支撑身份的 IaaS 基础设施**：
-
-- **AD DS 域控 VM**——如果还有需要域加入的 Windows 负载（企业里非常普遍）
-- **Entra Connect / Cloud Sync 服务器**——把本地 AD 同步到 Entra 的那台机器
-- **Entra Domain Services**（托管域，如果用）
-- **AD FS / AD CS**（遗留联合身份、内部 PKI）
-- 这些东西专用的 DNS
-
-**关键推论：纯 cloud-native、没有本地 AD、没有域加入需求的企业，这个订阅可以完全不存在。** 很多 CAF 图把它画成必需项，但它应根据实际身份需求决定。
+纯云原生且没有 AD DS 或域加入需求的组织可能不需要该订阅。
 
 ### Management 订阅
 
-- **中央 Log Analytics workspace**（所有订阅的日志汇聚点）
-- Azure Monitor 配套：Data Collection Rules、Managed Prometheus / Managed Grafana
-- **Automation Account**——Update Management、Change Tracking、Runbook
-- **Recovery Services vault / Backup vault**——中央备份策略
-- Azure Site Recovery
-- 长期日志归档的存储账户（冷/归档层）
+- 中央 Log Analytics Workspace
+- Data Collection Rule、Managed Prometheus、Managed Grafana 等 Azure Monitor 组件
+- Automation Account、Runbook、更新与变更跟踪
+- Recovery Services Vault、Backup Vault 与 Azure Site Recovery
+- 长期日志归档 Storage
 
-**它独立存在的理由是一句运维常识：日志和备份必须在它监控的东西挂掉时还能访问。**
-
-> **Sentinel 的 workspace 放 Management 还是单独的 Security 订阅？** 如果合规要求安全日志与运维日志使用不同 RBAC 边界，就应拆分。Security 订阅是很多企业在参考层级上增加的可选边界。
+被监控资源不可用时，监控和恢复服务仍应可访问。部分组织把 Microsoft Sentinel 放在独立 Security 订阅，以分离 SOC 与平台运维的访问边界。
 
 ### Connectivity 订阅
 
-- hub VNet、**Azure Firewall**、ExpressRoute circuit + gateway、VPN gateway、Virtual WAN
-- **所有 `privatelink.*` 私有 DNS 区域** + DNS Private Resolver
-- 全局入口：Front Door、Traffic Manager
-- 集中式 Application Gateway
-- 公网 IP prefix、DDoS Protection plan
-
-### VM / AKS 放哪？**都不放 Platform，放 Application Landing Zone**
-
-从名字上找不到位置，是因为**在按"技术类型"分类，而 ALZ 是按"所有权"分类的**。
-
-分界线不是 IaaS vs PaaS，也不是底层 vs 上层：
-
-| | Platform 订阅 | Application Landing Zone |
-|---|---|---|
-| **谁拥有** | 平台团队 | 业务/应用团队 |
-| **服务谁** | 整个组织 | 一个（或一组）工作负载 |
-| **成本怎么摊** | 集中摊销给全公司 | 记在那个产品头上 |
-| **变更节奏跟随** | 平台基线 | 应用发布周期 |
-
-跑业务应用的 AKS、VM、数据库、App Service——**全部在 Corp 或 Online landing zone 里**。Platform 订阅里几乎没有"业务"，只有"给业务用的共享基础设施"。
-
-### 资源归属判断法则
-
-不知道一个资源往哪放，问三个问题：
-
-1. **它挂了谁受影响？** 一个团队 → landing zone；全公司 → platform
-2. **成本该记在谁头上？** 一个产品 → landing zone；共享摊销 → platform
-3. **它跟着谁的节奏变更？** 应用发布 → landing zone；平台基线 → platform
-
-三个答案通常一致。不一致时**第 1 条优先**——爆炸半径决定归属。
-
-### 边界情况
-
-- **域控 VM** → Identity。是 VM，但服务全组织身份，三条法则都满足。
-- **共享自托管 CI agent 池 / 中央 Container Registry** → CAF 官方没给位置。实践中塞 Management，或加一个 **"Platform – Tooling/DevOps" 订阅**。这是官方图之外最常见的第四个平台订阅。
-- **内部开发者平台性质的共享 AKS**（多团队租用）→ 按三条法则像 platform，但 CAF 更倾向当成一个 landing zone，只是拥有者恰好是平台团队。两种划分都可以成立，关键是记录所有权和故障域的权衡。
+- Hub VNet、Azure Firewall、ExpressRoute Circuit/Gateway、VPN Gateway 或 Virtual WAN
+- 中央 `privatelink.*` Private DNS Zone 与 DNS Private Resolver
+- Front Door、Traffic Manager 或 Application Gateway 等共享入口
+- Public IP Prefix 与 DDoS Protection Plan
 
 ### Security 订阅
 
-- 按需启用 Microsoft Sentinel workspace 和 Data Connector
-- SOC 管理的自动化、Playbook 与调查服务
-- 需要独立访问和成本边界的安全工具
+- 按需启用的 Microsoft Sentinel Workspace 与 Data Connector
+- SOC 所有的自动化、Playbook 和调查服务
+- 需要独立访问与成本边界的安全工具
 
-在需要这些能力前，该订阅可以保持为空。建立治理边界不等于必须立即启用收费的安全服务。
+在需要这些能力之前，订阅可以保持为空。建立治理边界不等于必须启用收费的安全服务。
 
-### GCP 对照
+### 工作负载 VM 和 AKS 属于应用 Landing Zone
 
-- Platform 订阅 ≈ 你的**宿主/共享项目**（Shared VPC host project、中央日志项目、CI/CD 工具项目）
-- Application landing zone ≈ 业务 **project**
+ALZ 按**所有权和故障半径**组织资源，而不是按资源类型组织。
 
-DCN 迁移时你决定"哪些资源进共享项目、哪些进业务项目"，用的就是同一套逻辑：归属和故障半径比资源类型更重要。
+| 判断项 | Platform 订阅 | Application Landing Zone |
+|---|---|---|
+| 所有者 | 平台团队 | 应用或产品团队 |
+| 服务对象 | 整个组织 | 一个工作负载或产品组 |
+| 成本归属 | 共享平台成本 | 产品成本中心 |
+| 变更节奏 | 平台基线 | 应用发布周期 |
 
----
+因此，业务 VM、AKS Cluster、Database 和 App Service 应位于 Corp 或 Online 订阅。Platform 订阅主要包含工作负载共同使用的共享服务。
 
-## CAF 八大设计域
+### 资源归位标准
 
-| # | 设计域 | 核心问题 | 本 lab 里的体现 |
+应评估三个标准：
+
+1. 资源故障影响一个团队，还是整个组织？
+2. 成本应归属于一个产品，还是共享平台预算？
+3. 资源随应用发布周期变更，还是随平台基线变更？
+
+这些结果通常一致；不一致时优先考虑故障半径。
+
+示例：
+
+- 域控制器 VM 服务整个组织，因此位于 Identity。
+- 共享 CI Agent 或中央 Container Registry 可能需要独立的 Platform Tooling/DevOps 订阅。
+- 多团队使用的内部开发者平台 AKS Cluster 是真实的边界案例。它可以作为平台服务，也可以作为平台团队所有的 Landing Zone；应记录所有权和故障域取舍。
+
+## CAF 八个设计领域
+
+| # | 设计领域 | 核心问题 | 本实验覆盖 |
 |---|---|---|---|
-| 1 | **Azure billing & Entra tenant** | 一个租户还是多个？EA/MCA 计费层级怎么切？ | 一个租户、一个 MCA Invoice Section、9 个角色订阅；见 [04-subscription-vending_cn.md](04-subscription-vending_cn.md) |
-| 2 | **Identity & access management** | 谁能做什么？特权怎么管？ | Entra RBAC、role assignment、PIM（讨论） |
-| 3 | **Resource organization** | 管理组/订阅/RG 怎么分层，怎么命名，怎么打标签 | `10-governance` 全部 |
-| 4 | **Network topology & connectivity** | Hub-spoke 还是 Virtual WAN？出口怎么控？混合怎么连？ | `20-platform` 全部，见 [02-networking_cn.md](02-networking_cn.md) |
-| 5 | **Security** | 加密、密钥、威胁检测、边界 | Firewall、NSG、Private Endpoint、Defender for Cloud |
-| 6 | **Management** | 监控、备份、补丁、告警 | Log Analytics + diagnostic settings |
-| 7 | **Governance** | 用什么机制保证前面几条不会被绕过 | Azure Policy + Initiative + 合规仪表盘 |
-| 8 | **Platform automation & DevOps** | 这一切怎么用代码交付和演进 | Terraform + Azure DevOps，见 [03-azure-devops_cn.md](03-azure-devops_cn.md) |
+| 1 | **Azure 计费与 Entra 租户** | 租户和计费层级 | 多订阅路线：一个租户、一个 MCA Invoice Section 和九个角色订阅；单订阅路线：一个现有订阅和逻辑角色。参见 [04-subscription-vending_cn.md](04-subscription-vending_cn.md) 与 [05-single-subscription_cn.md](05-single-subscription_cn.md) |
+| 2 | **身份与访问管理** | 谁能执行哪些操作，特权如何受控？ | Role Assignment 与 Managed Identity；PIM 作为概念扩展 |
+| 3 | **资源组织** | Management Group、Subscription、Resource Group、名称和标签如何分层？ | `10-governance` |
+| 4 | **网络拓扑与连接** | Hub-Spoke 或 Virtual WAN、出口和混合连接 | `20-platform`；参见 [02-networking_cn.md](02-networking_cn.md) |
+| 5 | **安全** | 加密、密钥、威胁检测和网络边界 | Firewall、NSG、Private Endpoint；不部署 Defender |
+| 6 | **管理** | 监控、备份、补丁和告警 | Log Analytics 与 Diagnostic Setting |
+| 7 | **治理** | 如何强制执行前述设计决策？ | Azure Policy 与合规状态 |
+| 8 | **平台自动化与 DevOps** | 平台如何以代码交付和演进？ | Terraform 与 Azure Pipelines；参见 [03-azure-devops_cn.md](03-azure-devops_cn.md) |
 
-**理解顺序**：计费与租户 → 身份 → 资源组织 → 网络 → 安全 → 运维 → 治理 → 自动化。
+一种实用顺序是：计费 → 身份 → 资源组织 → 网络 → 安全 → 运维 → 强制执行 → 自动化。
 
----
+## Azure Policy
 
-## Azure Policy：比 GCP Org Policy 强在哪
+Azure Policy 提供的 Effect 不限于传统 Audit 或 Deny：
 
-这是最值得你花时间的一块，因为它没有干净的 GCP 对应物。
-
-**五种 effect：**
-
-| Effect | 行为 | 典型用途 |
+| Effect | 行为 | 常见用途 |
 |---|---|---|
-| `Audit` | 记录不合规，不阻止 | 新策略上线的第一阶段，永远从这里开始 |
-| `Deny` | 直接拒绝部署 | allowed locations、禁止公网 IP |
-| `Append` | 部署时追加属性 | 强制加标签 |
-| `Modify` | 修改现有资源的属性（配合 remediation task） | 批量补标签、开加密 |
-| `DeployIfNotExists` (DINE) | **缺什么就替你部署什么** | 自动给每个新资源挂诊断设置、自动装监控 agent |
+| `Audit` | 记录不合规但不阻止 | 新 Policy 上线的第一阶段 |
+| `Deny` | 拒绝部署 | Allowed Locations 或禁止公网 IP |
+| `Append` | 部署期间追加字段 | 必需标签或属性 |
+| `Modify` | 修改受支持的属性，通常配合 Remediation | 增加标签或启用设置 |
+| `DeployIfNotExists`（DINE） | 部署缺失配置 | Diagnostic Setting 或监控 Agent |
 
-**DINE 是 ALZ 的重要机制**，也是常见故障源。需要注意三点：
+DINE 实施需要满足三项条件：
 
-1. DINE 和 Modify 的 assignment **必须有 managed identity**（Terraform 里就是 `identity {}` + `location`）。
-2. 那个 identity **必须在 assignment 作用域上有 RBAC 角色**，否则修复会静默失败，报 "insufficient permissions"。
-3. DINE **只对新建或重新评估的资源生效**。存量不合规资源需要手动发起 **remediation task**。
+1. DINE 或 Modify Assignment 需要 Managed Identity。
+2. 该身份必须在 Assignment Scope 具有正确 RBAC Role，否则 Remediation 会因权限不足而失败。
+3. 现有不合规资源通常需要显式创建 **Remediation Task**；仅创建 Assignment 不会追溯修复全部资源。
 
-**Initiative（策略集）**：把几十条相关策略打包成一个可分配单元。ALZ 官方提供的 initiative 有上百条策略。企业里你不会一条条分配。
+**Initiative** 把相关 Policy Definition 组合成一个可分配单元。**Policy Exemption** 记录已批准的例外并可设置到期时间；限时豁免可防止临时决策成为永久治理缺口。
 
-**策略豁免（exemption）**：真实世界里一定会有例外。Azure Policy 支持带**到期时间**的 exemption；设置到期时间可以避免"临时例外"永久化。
+### 安全发布模式
 
----
+先使用 Audit，检查合规状态和误报，修复现有资源，再逐步提升为 Deny。应尽量先在较低环境验证，并为真实例外使用有记录且会到期的 Exemption。
 
-## 落地路径：企业里 ALZ 通常怎么建
+## ALZ 实施方式
 
-### "Accelerator" 是一个被过度重载的词 —— 至少指四种不同的东西
+*Accelerator* 一词可能指不同实现：
 
-这是最容易误解的一点。听到 "ALZ accelerator" 必须先问是哪一个：
-
-| 名称 | 是什么 | 符合 GitOps 吗 |
+| 选项 | 内容 | 是否为代码优先流程？ |
 |---|---|---|
-| **Portal accelerator**（门户里的 "Azure landing zone" 部署向导） | 纯 UI 点击，后台跑 ARM 模板 | ❌ **完全不符合**。产物不在你的 Git 里，无法评审、无法回滚、无法追溯。**只适合 demo 和 POC，企业不要用** |
-| **ALZ Bicep**（`Azure/ALZ-Bicep` 仓库） | 一组 Bicep 模块，你在自己的 repo 里引用 | ✅ 代码，你的流水线部署 |
-| **ALZ Terraform / AVM 的 ALZ 模块** | 一组 Terraform 模块，同上 | ✅ 代码 |
-| **ALZ Accelerator（bootstrap，`ALZ` PowerShell 模块）** | **一次性脚手架**。本地跑一次，它替你创建 Git 仓库、配好 OIDC 身份、种下 IaC 代码、建好 CI/CD 流水线 | ✅ 它本身不是运行时，**跑完之后一切都在 Git 里**，和 `create-react-app` 是同一类东西 |
+| Portal Accelerator | 通过 Portal 向导部署 ARM 资源 | 默认没有受源代码管理的期望状态；适合演示和评估 |
+| ALZ-Bicep | 在组织仓库中引用的 Bicep Module | 是 |
+| ALZ Terraform / AVM Module | 在组织仓库中引用的 Terraform Module | 是 |
+| ALZ Bootstrap Accelerator | 一次性创建 Repository、Federated Identity、IaC 和 Pipeline 的脚手架 | 是；用于建立代码优先的运营模型 |
 
-Portal accelerator 偏向交互式评估；Bicep/Terraform accelerator 是模块库，bootstrap accelerator 是脚手架，后两者适合代码化交付流程。
+Portal 体验、可复用 IaC Module 和 Bootstrap 工具解决不同问题，实施前应明确所指的 Accelerator。
 
-完成手工治理、网络和交付实验后，继续阅读 [05-alz-accelerator_cn.md](05-alz-accelerator_cn.md)，生成并审查官方 Terraform 路线。
+完成手工治理、网络和交付实验后，按照 [06-alz-accelerator_cn.md](06-alz-accelerator_cn.md)生成并审查官方 Terraform 路线。
 
-### 但要说清楚：Azure 的 ALZ 不是 Argo CD 那种 GitOps
+### Azure ALZ 与 Argo CD GitOps 的差异
 
-Kubernetes 中的 Argo CD 是常驻控制器，会持续读取 Git 并把集群拉回期望状态。Azure 平台层没有完全相同的默认机制：
-
-| | Kubernetes + Argo CD | Azure ALZ |
+| | Kubernetes 与 Argo CD | 使用 Terraform 的 Azure ALZ |
 |---|---|---|
-| 模式 | **拉取式**，控制器主动 reconcile | **推送式**，流水线跑 `terraform apply` |
-| 漂移检测 | 控制器持续对比，自动 self-heal | 靠**定时 `terraform plan`**（多数企业跑夜间 plan，有 diff 就告警） |
-| 谁能改 | 改集群会被立刻拉回去 | 有人在 Portal 手改，要等下次 plan 才发现 |
+| 模式 | 拉取式持续协调 | Pipeline 推送 `terraform apply` |
+| 漂移检测 | 持续检测，可选自动恢复 | 通常使用定时 `terraform plan` 和告警 |
+| Portal/手工变更 | Controller 负责协调 | 除非 Policy 介入，否则在后续 Plan 才会发现 |
 
-**唯一真正持续 reconcile 的机制是 Azure Policy。** `deployIfNotExists` 和 `modify` 效果就是平台层的 reconciliation loop：它持续评估，发现缺失就补上。
+Azure Policy 是 Azure 控制平面上最接近持续协调循环的机制。DINE 和 Modify 会持续评估资源，并可恢复必需配置。一种实用职责划分是：**Terraform 定义存在哪些资源；Policy 定义资源必须满足的配置并持续评估。**
 
-这给你一个很漂亮的架构叙述：
+Azure Service Operator 或 Crossplane 等 Controller 可以提供拉取式 Azure 资源协调，但会引入 Kubernetes 控制平面依赖，应作为明确的架构选择。
 
-> "Terraform defines desired state and the pipeline pushes it, but the continuous reconciliation loop in Azure is Azure Policy — DINE and modify effects are what actually pull configuration back to the baseline without a human. So the pattern is: Terraform for what exists, Policy for how it must be configured. On GKE I get both from Argo CD; on Azure they're two different mechanisms, and knowing which belongs where is most of the design."
+## 把 Landing Zone 作为产品运营
 
-如需拉取式持续协调，可以使用 **Azure Service Operator** 或 **Crossplane** 从 Kubernetes 声明 Azure 资源。这样会把 Azure 治理依赖于 Kubernetes 控制平面，应作为明确的架构取舍。
+ALZ 不是一次性项目，外部和内部需求都会持续变化：
 
----
+- ALZ-Bicep 与 Azure Verified Modules 会发布新版本，其中可能包含破坏性变更。
+- Built-in Policy Definition 与 Initiative 会演进、弃用或替换。
+- 新 Azure 服务会引入旧基线尚未覆盖的资源类型和 Private DNS Zone。
+- 组织会增加业务单元、区域、收购实体和合规义务。
+- Policy Effect 会从 Audit 成熟到 Deny，Exemption 也需要在到期时复核。
 
-## 落地路径（续）
+Landing Zone 应具有 Owner、Backlog、版本、Release Note、测试和内部文档，并按产品持续运营。
 
-1. **策略先 Audit 再 Deny**。先跑两周，看合规仪表盘，把误伤修掉，再切 Deny。
-2. **subscription vending**：landing zone 的交付要产品化——业务团队提一个 PR 或填一个表单，流水线自动创建订阅、挂到正确的管理组、建 VNet、peering 到 hub、配好 RBAC 和预算告警。这是"平台即产品"在 Azure 上的具体形态。
-
----
-
-## "ALZ 不是一次性项目" 指的是什么
-
-**两个方向同时在推，这是一个持续的产品运营工作，不是一个有交付日期的项目。**
-
-### 方向一：微软在变（外部推力）
-
-- **模块有版本发布**，AVM / ALZ-Bicep 定期发新版，**有 breaking change**。你 pin 在 v0.x 上不升级，两年后就升不动了。
-- **官方策略基线在更新**——新增内置策略定义、旧的被弃用、initiative 内容变化。
-- **Azure 平台本身在长新东西**：每出一个新 PaaS 服务，就多一个 `privatelink.*` DNS 区域要加、多一批需要被策略覆盖的资源类型。**你的"必须用 private endpoint"策略覆盖不到上个月 GA 的那个新服务——这就是治理空洞，而且是自动产生的。**
-
-### 方向二：企业在变（内部推力）
-
-- 新业务单元、新区域、收购来的公司要并进来
-- 新合规要求：APRA CPS 234、IRAP、PCI-DSS、行业审计发现
-- 新的 landing zone 原型（data landing zone、AI/ML landing zone、给第三方的隔离区）
-- **策略基线要持续收紧**：上线时一大半策略是 Audit，随着治理成熟逐条转 Deny。这本身就是长期工作。
-- **豁免到期管理**：每个 exemption 都有到期日，到期要么修好要么重新论证。没人管的话"临时豁免"会永久化，治理就名存实亡。
-
-### 所以正确的组织方式
-
-ALZ 要像产品一样运营：**有 owner、有 backlog、有版本号、有 release notes、有面向内部客户的文档**。不是一个搭完就解散的项目组。
-
----
+**Subscription Vending** 是关键产品能力：Request 或 Pull Request 应以一致方式创建订阅、放入正确管理组、配置网络与 Peering、分配 RBAC，并应用预算和 Policy 控制。
 
 ## 常见误解
 
-| 误解 | 实情 |
+| 误解 | 实际情况 |
 |---|---|
-| "ALZ 就是 hub-spoke 网络" | 网络只是八分之一。ALZ 的核心是**被治理的订阅** |
-| "landing zone 是一次性搭好的" | 它是持续演进的产品，有版本、有 backlog、有 breaking change |
-| "策略在管理组上设了就一定生效" | Deny 不能追溯已存在的资源；DINE 需要 identity + RBAC + remediation task |
-| "Entra Global Admin 就能管所有 Azure 资源" | 身份平面 ≠ 资源平面。需要在 Entra 里做 **elevate access** 才能拿到租户根的 User Access Administrator |
-| "管理组越多越好" | 每一层都增加策略排障难度。CAF 的建议是**尽量扁平**，不要按部门镜像组织架构 |
+| ALZ 就是 Hub-Spoke 网络 | 网络只是一个设计领域；Landing Zone 是受治理的订阅基础 |
+| Landing Zone 搭建一次即可 | 它是带版本并持续演进的平台产品 |
+| Policy Assignment 会自动修复全部资源 | Deny 不追溯现有资源；DINE 需要 Identity、RBAC、Evaluation 和 Remediation |
+| Entra Global Administrator 自动拥有全部 Azure 资源权限 | 目录授权与资源授权相互独立；可能需要在租户根提升访问权限 |
+| Management Group 层级越多越好 | 每一层都会增加继承和排障复杂度，应在满足要求的前提下保持扁平 |
 
----
+## 动手检查清单
 
-## 动手清单（对照 `terraform/10-governance/`）
-
-- [ ] `terraform apply`，在 Portal 的 Management groups 页面看到层级
-- [ ] 设置 `move_subscriptions_into_hierarchy = true`，并确认所有角色订阅归位正确
-- [ ] 去 Policy → Compliance 看合规状态（第一次评估要等 10-30 分钟）
-- [ ] 把 `public_ip_policy_effect` 从 `Audit` 改成 `Deny`，然后**故意**去建一个带公网 IP 的 VM，看着它被拒绝，并读懂错误信息里的 policy assignment id
-- [ ] 给自己写一条策略豁免（Portal 上操作即可），观察合规状态变化
-- [ ] 打开 `log_analytics_workspace_id`，观察 DINE 策略的 identity 和 role assignment 被创建；再去 Remediation 页面手动发起一次修复任务
-
-完成这六步后，你将覆盖 ALZ 治理层的核心机制。
+- [ ] 使用所选路线对应的 Manifest Apply `terraform/10-governance/`，在 `move_subscriptions_into_hierarchy = false` 时检查层级。
+- [ ] 多订阅路线：启用移动并验证九个角色订阅；单订阅路线：按需启用移动，并验证唯一订阅只有所选的一个父管理组。
+- [ ] 等待第一次评估完成后检查 Policy Compliance。
+- [ ] 盘点现有工作负载并把测试订阅置于 Corp 后，将 `public_ip_policy_effect` 从 `Audit` 改为 `Deny`；尝试部署一次性公网 IP VM，并从错误中识别 Assignment ID。
+- [ ] 创建限时 Policy Exemption，并观察其合规状态。
+- [ ] 设置 `log_analytics_workspace_id`，检查 DINE Assignment Identity 与 Role Assignment，并启动 Remediation Task。
 
 ---
 

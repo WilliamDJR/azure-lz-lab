@@ -18,7 +18,7 @@ resource "azurerm_public_ip" "firewall" {
   location            = azurerm_resource_group.connectivity.location
   allocation_method   = "Static"
   sku                 = "Standard" # Azure Firewall requires Standard SKU, Static
-  tags                = var.tags
+  tags                = local.role_tags.connectivity
 }
 
 resource "azurerm_public_ip" "firewall_mgmt" {
@@ -31,7 +31,7 @@ resource "azurerm_public_ip" "firewall_mgmt" {
   location            = azurerm_resource_group.connectivity.location
   allocation_method   = "Static"
   sku                 = "Standard"
-  tags                = var.tags
+  tags                = local.role_tags.connectivity
 }
 
 ###############################################################################
@@ -41,8 +41,8 @@ resource "azurerm_public_ip" "firewall_mgmt" {
 # you build a PARENT policy owned by security (baseline deny, mandatory
 # allow-list, threat intel) and CHILD policies inherited by each regional
 # firewall, which application teams can extend without touching the baseline.
-# That parent/child inheritance is the answer to "how do you let app teams
-# self-serve firewall rules without giving them the firewall".
+# Parent/child inheritance lets application teams extend approved rule sets
+# without granting them ownership of the shared firewall or security baseline.
 ###############################################################################
 
 resource "azurerm_firewall_policy" "hub" {
@@ -54,7 +54,7 @@ resource "azurerm_firewall_policy" "hub" {
   resource_group_name = azurerm_resource_group.connectivity.name
   location            = azurerm_resource_group.connectivity.location
   sku                 = var.firewall_sku_tier
-  tags                = var.tags
+  tags                = local.role_tags.connectivity
 
   threat_intelligence_mode = "Alert"
 
@@ -149,7 +149,7 @@ resource "azurerm_firewall" "hub" {
   sku_name            = "AZFW_VNet"
   sku_tier            = var.firewall_sku_tier
   firewall_policy_id  = azurerm_firewall_policy.hub[0].id
-  tags                = var.tags
+  tags                = local.role_tags.connectivity
 
   ip_configuration {
     name                 = "ipconfig-primary"

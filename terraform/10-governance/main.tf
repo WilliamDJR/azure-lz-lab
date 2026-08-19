@@ -119,6 +119,16 @@ locals {
     sandbox      = azurerm_management_group.sandbox.id
   }
 
+  single_subscription_management_group_ids = {
+    management   = azurerm_management_group.platform_management.id
+    connectivity = azurerm_management_group.platform_connectivity.id
+    identity     = azurerm_management_group.platform_identity.id
+    security     = azurerm_management_group.platform_security.id
+    corp         = azurerm_management_group.corp.id
+    online       = azurerm_management_group.online.id
+    sandbox      = azurerm_management_group.sandbox.id
+  }
+
   role_assignment_scopes = {
     root          = azurerm_management_group.intermediate_root.id
     platform      = azurerm_management_group.platform.id
@@ -134,10 +144,19 @@ locals {
 }
 
 resource "azurerm_management_group_subscription_association" "role" {
-  for_each = var.move_subscriptions_into_hierarchy ? var.subscription_ids : {}
+  # A subscription can have only one management-group parent. Shared IDs are
+  # handled by the single association below, never by nine role associations.
+  for_each = var.move_subscriptions_into_hierarchy && !var.allow_shared_subscription_ids ? var.subscription_ids : {}
 
   management_group_id = local.subscription_management_group_ids[each.key]
   subscription_id     = "/subscriptions/${each.value}"
+}
+
+resource "azurerm_management_group_subscription_association" "single" {
+  count = var.move_subscriptions_into_hierarchy && var.allow_shared_subscription_ids ? 1 : 0
+
+  management_group_id = local.single_subscription_management_group_ids[var.single_subscription_management_group_key]
+  subscription_id     = "/subscriptions/${var.subscription_ids.management}"
 }
 
 resource "azurerm_role_assignment" "management_group" {
@@ -161,6 +180,7 @@ resource "azurerm_management_group_policy_assignment" "allowed_locations" {
   management_group_id  = azurerm_management_group.intermediate_root.id
   policy_definition_id = "/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c"
   description          = "Restricts resource deployment to approved regions."
+  enforce              = var.enforce_allowed_locations_policy
 
   parameters = jsonencode({
     listOfAllowedLocations = {
@@ -254,8 +274,7 @@ resource "azurerm_management_group_policy_assignment" "deny_nic_public_ip" {
 # Two implementation requirements:
 #   1. The assignment needs a MANAGED IDENTITY (identity {} + location).
 #   2. That identity needs an RBAC role at the assignment scope, otherwise
-#      remediation silently fails with "insufficient permissions". This is the
-#      classic ALZ troubleshooting question.
+#      remediation fails with "insufficient permissions".
 #
 # Also note: deployIfNotExists only acts on NEW or RE-EVALUATED resources.
 # Existing non-compliant resources need a REMEDIATION TASK to be kicked off.
@@ -285,7 +304,8 @@ resource "azurerm_management_group_policy_assignment" "activity_log_to_law" {
 resource "azurerm_role_assignment" "policy_identity_monitoring_contributor" {
   count = var.log_analytics_workspace_id == null ? 0 : 1
 
-  scope                = azurerm_management_group.intermediate_root.id
-  role_definition_name = "Monitoring Contributor"
-  principal_id         = azurerm_management_group_policy_assignment.activity_log_to_law[0].identity[0].principal_id
+  scope                            = azurerm_management_group.intermediate_root.id
+  role_definition_name             = "Monitoring Contributor"
+  principal_id                     = azurerm_management_group_policy_assignment.activity_log_to_law[0].identity[0].principal_id
+  skip_service_principal_aad_check = true
 }

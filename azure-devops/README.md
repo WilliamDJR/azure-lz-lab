@@ -26,8 +26,13 @@ open https://dev.azure.com          # A Microsoft account is sufficient
 # 3. Pipelines -> Library -> + Variable group
 #    Name it platform-common and add:
 #      TF_VERSION, TF_BACKEND_RESOURCE_GROUP, TF_BACKEND_STORAGE_ACCOUNT,
-#      TF_BACKEND_CONTAINER, TF_BACKEND_KEY, and SUBSCRIPTION_IDS_JSON.
+#      TF_BACKEND_CONTAINER, TF_BACKEND_KEY, SUBSCRIPTION_IDS_JSON, and
+#      ALLOW_SHARED_SUBSCRIPTION_IDS.
 #    SUBSCRIPTION_IDS_JSON is the JSON object matching terraform/subscriptions.tfvars.
+#    Use false for multi-subscription mode and true only for the documented
+#    single-subscription track.
+#    Single mode must use 10-governance-single.tfstate or
+#    20-platform-single.tfstate as appropriate.
 
 # 4. Pipelines -> Environments -> New environment
 #    Name it alz-lab -> Approvals and checks -> Approvals -> add yourself.
@@ -48,6 +53,8 @@ extends:
 In production, keep shared templates in a separate repository and pin consumers to a tag. One template change can affect every consuming repository, so versioning is essential for controlling blast radius.
 
 The workload identity behind the service connection must have the required least-privilege roles in every subscription used by the provider aliases, plus Blob Data access to the state container. Scoping the Azure DevOps service connection to Management alone does not automatically grant access to Connectivity, Security, Corp Dev, or Sandbox.
+
+Never point single- and multi-subscription runs, or the Governance and Platform roots, at the same `TF_BACKEND_KEY`. Separate keys prevent one simulated layout from overwriting another root's state.
 
 ## What to observe
 

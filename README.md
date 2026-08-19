@@ -2,11 +2,21 @@
 
 [中文版](README_cn.md)
 
-This repository is organized as **foundations first, deployment and validation second**. It builds an enterprise-shaped Azure Landing Zone (ALZ) across multiple subscriptions while keeping expensive services optional and short-lived.
+This repository is organized as **foundations first, deployment and validation second**. It supports both a constrained one-subscription capability lab and an enterprise-shaped multi-subscription Azure Landing Zone (ALZ), while keeping expensive services optional and short-lived.
 
-Important billing constraint: an Azure Sponsorship credit balance and permission to create additional subscriptions are separate capabilities. Some sponsorship, promotional, MOSP, or newly created MCA accounts reject a second subscription with `PurchaseNeedsReview`. Read the [subscription vending guide](docs/04-subscription-vending.md) before attempting multi-subscription creation; it includes a single-subscription learning track when the account is not eligible.
+Important billing constraint: an Azure Sponsorship credit balance and permission to create additional subscriptions are separate capabilities. Some sponsorship, promotional, MOSP, or newly created MCA accounts reject a second subscription with `PurchaseNeedsReview`. Read the [subscription vending guide](docs/04-subscription-vending.md) before attempting multi-subscription creation.
 
-The lab is intentionally smaller than a production ALZ, but its boundaries are realistic: billing and governance are separate, platform capabilities have dedicated subscriptions, development and production have separate workload subscriptions, Terraform state is remote, and every Azure CLI operation is subscription-aware.
+## Choose the route that matches the available subscriptions
+
+| Available subscriptions | Route | Outcome |
+|---|---|---|
+| One existing subscription | [Single-subscription capability lab](docs/05-single-subscription.md) | Deploy the manual Terraform implementation with logical role resource groups; practise governance, Policy, networking, observability and delivery without claiming subscription isolation |
+| Two subscriptions | Official Accelerator SMB scenario with Management + Connectivity | Use the official wizard rather than this repository's four-subscription wrapper; plan Identity and Security subscriptions for later |
+| Four dedicated platform subscriptions plus workload subscriptions | Multi-subscription route below, followed by the [full Accelerator exercise](docs/06-alz-accelerator.md) | Validate enterprise subscription placement, cross-subscription permissions and platform/workload boundaries. The manual topology below requires nine unique role IDs. |
+
+The official Accelerator currently recommends four platform subscriptions and documents two as the SMB minimum. One subscription is supported by this repository's manual capability lab, not as an official Accelerator deployment topology. [Official planning guidance](https://azure.github.io/Azure-Landing-Zones/accelerator/0_planning/)
+
+The multi-subscription target is intentionally smaller than a production ALZ, but its boundaries are realistic: billing and governance are separate, platform capabilities have dedicated subscriptions, development and production have separate workload subscriptions, Terraform state is remote, and every Azure CLI operation is subscription-aware.
 
 ## What the lab now covers
 
@@ -14,14 +24,14 @@ The lab is intentionally smaller than a production ALZ, but its boundaries are r
 |---|---|
 | Billing and tenant | MCA Billing Profile/Invoice Section bootstrap, multi-subscription manifest, staged subscription creation |
 | Identity and access | Management-group RBAC inputs, managed identities, pipeline federation; PIM remains a manual extension |
-| Resource organization | Intermediate root, Platform, Security, Corp, Online, Sandbox, Decommissioned, and nine role subscriptions |
-| Network and connectivity | Cross-subscription Hub-Spoke, UDR, Firewall, VPN Gateway, Private Endpoint, and centralized Private DNS |
+| Resource organization | Intermediate root, Platform, Security, Corp, Online, Sandbox and Decommissioned; nine real role subscriptions or one logically partitioned subscription |
+| Network and connectivity | Cross-subscription or single-subscription Hub-Spoke, UDR, Firewall, VPN Gateway, Private Endpoint, and centralized Private DNS |
 | Security | Policy, NSG, Firewall, private access, optional dedicated Sentinel workspace |
 | Management and operations | Central Log Analytics, diagnostics, KQL, daily ingestion caps, subscription budgets |
 | Governance | Audit, Deny, DINE, compliance and remediation patterns |
 | Platform automation | Remote Terraform state, provider aliases, reusable Azure Pipelines example, safe cleanup scripts |
 
-## Target architecture
+## Multi-subscription target architecture
 
 ```text
 MCA Billing Profile + Invoice Section (shared eligible credit pool)
@@ -59,7 +69,8 @@ docs/
   02-networking.md
   03-azure-devops.md
   04-subscription-vending.md
-  05-alz-accelerator.md
+  05-single-subscription.md
+  06-alz-accelerator.md
 
 accelerator/
   prepare-config.ps1             generate reviewed official local inputs
@@ -67,6 +78,8 @@ accelerator/
 
 terraform/
   subscriptions.tfvars.example   shared role-to-subscription manifest
+  subscriptions.single.tfvars.example
+                                  one-subscription role manifest
   00-bootstrap/                   protected remote state storage
   10-governance/                  management groups, Policy, RBAC, budgets
   20-platform/                    resources deployed across role subscriptions
@@ -75,6 +88,7 @@ scripts/
   create-subscriptions.sh         dry-run-first MCA subscription vending
   init-backends.sh                initialise separate remote state keys
   test-private-dns.sh             validate Private Endpoint DNS from Corp Dev
+  test-egress.sh                  compare default and Firewall egress
   show-effective-routes.sh        inspect Corp Dev effective routes
   destroy-expensive.sh            remove billed session resources
   nuke-everything.sh              remove platform and governance roots
@@ -88,7 +102,8 @@ Read these in order before applying Terraform:
 2. [Enterprise Azure networking](docs/02-networking.md): Hub-Spoke routing, peering, Firewall, hybrid connectivity, Private Endpoint and DNS.
 3. [Azure DevOps and operations](docs/03-azure-devops.md): Terraform delivery, approvals, workload identity federation, diagnostic settings and KQL.
 4. [Multi-subscription bootstrap and vending](docs/04-subscription-vending.md): MCA billing scope, safe creation order, subscription roles, vending and cost controls.
-5. [Microsoft ALZ IaC Accelerator](docs/05-alz-accelerator.md): official production-oriented bootstrap, AVM/Policy configuration, generated delivery assets, cost review, upgrades and cleanup.
+5. [Single-subscription capability lab](docs/05-single-subscription.md): executable fallback, logical role boundaries, Policy inheritance, networking, validation, cleanup and later migration.
+6. [Microsoft ALZ IaC Accelerator](docs/06-alz-accelerator.md): official production-oriented bootstrap, AVM/Policy configuration, generated delivery assets, cost review, upgrades and cleanup.
 
 Checkpoints before deployment:
 
@@ -98,7 +113,9 @@ Checkpoints before deployment:
 - Explain why DINE needs both a managed identity and RBAC.
 - Identify which resources are billed continuously and how they will be removed.
 
-# Part 2: Deployment and validation
+# Part 2: Multi-subscription deployment and validation
+
+The steps below require all nine role-subscription IDs to be unique. If only one subscription is available, follow [Part 05](docs/05-single-subscription.md) instead; it has its own manifest, backend keys, safety gates and validation sequence.
 
 ## 0. Prerequisites and safety
 
@@ -152,7 +169,7 @@ terraform plan -out=tfplan
 terraform apply tfplan
 cd ../..
 
-./scripts/init-backends.sh
+./scripts/init-backends.sh --mode multi
 ```
 
 Azure RBAC propagation can delay first access to the container. If the role assignment was created successfully but container access is initially denied, wait briefly and apply again.
@@ -171,6 +188,7 @@ Use these safe first-run values:
 ```hcl
 move_subscriptions_into_hierarchy = false
 public_ip_policy_effect            = "Audit"
+enforce_allowed_locations_policy   = false
 ```
 
 ```bash
@@ -181,7 +199,7 @@ terraform show tfplan
 terraform apply tfplan
 ```
 
-Inspect the hierarchy and Policy assignments in the portal before moving any subscription. Management-group and Policy propagation can take time.
+Inspect the hierarchy and Policy assignments in the portal before moving any subscription. The Allowed Locations assignment starts in `DoNotEnforce` mode because it would otherwise affect every resource in each moved subscription. Inventory current regions and update `allowed_locations` before deliberately enabling it. Management-group and Policy propagation can take time.
 
 To enable per-subscription budgets, set `budget_start_date` to the first day of the current month, configure amounts and contact emails, then review another plan. Budgets alert; they do not stop consumption.
 
@@ -211,7 +229,7 @@ terraform apply tfplan
 terraform output
 ```
 
-The baseline creates Management logging, the Connectivity Hub and Private DNS zone, a Corp Dev spoke and private Storage endpoint, and a private test VM. Cross-subscription peering and DNS links are created with explicit provider aliases.
+The baseline creates Management logging, the Connectivity Hub and Private DNS zone, a Corp Dev spoke and private Storage endpoint, and a private test VM. Cross-subscription peering and DNS links are created with explicit provider aliases. It is low-cost, not free: the VM, disk, Storage, Private Endpoint and log ingestion can all generate charges.
 
 ## 5. Connect central logging and place subscriptions
 
@@ -221,7 +239,7 @@ Get the central workspace ID:
 terraform output -raw log_analytics_workspace_id
 ```
 
-Set that value as `log_analytics_workspace_id` in `terraform/10-governance/terraform.tfvars`. Review and apply governance again. This enables the DINE Activity Log assignment and its remediation identity.
+Set that value as `log_analytics_workspace_id` in `terraform/10-governance/terraform.tfvars`. Review and apply governance again. This enables the DINE Activity Log assignment, its managed identity and the RBAC role required for remediation.
 
 After checking every ID and target management group, change:
 
@@ -229,7 +247,7 @@ After checking every ID and target management group, change:
 move_subscriptions_into_hierarchy = true
 ```
 
-Plan, review, and apply the governance root with `-var-file=../subscriptions.tfvars`. Confirm all nine subscriptions appear in their intended management groups.
+Plan, review, and apply the governance root with `-var-file=../subscriptions.tfvars`. Confirm all nine subscriptions appear in their intended management groups. Then trigger a compliance scan, create a remediation task for `activity-log-to-law`, and verify that each subscription receives an Activity Log diagnostic setting pointing to the Management workspace. The [single-subscription DINE exercise](docs/05-single-subscription.md) provides the complete CLI sequence; the same assignment/evaluation/remediation pattern applies at management-group scope here.
 
 ## 6. Validate Private DNS and routing
 
@@ -289,6 +307,7 @@ Set `enable_firewall = true`, plan and apply with the subscription var file, the
 ```bash
 ./scripts/show-effective-routes.sh | tee /tmp/alz-routes-firewall.txt
 diff -u /tmp/alz-routes-baseline.txt /tmp/alz-routes-firewall.txt
+./scripts/test-egress.sh
 ```
 
 Use the KQL in [the operations guide](docs/03-azure-devops.md) to inspect Firewall decisions.
@@ -300,9 +319,10 @@ After removing Firewall, enable both gateway switches:
 ```hcl
 enable_vpn_gateway      = true
 enable_simulated_onprem = true
+enable_test_vm          = true
 ```
 
-Gateway provisioning can take a long time and both gateways are billed while present. Inspect peering gateway transit and effective routes, then remove them immediately.
+`destroy-expensive.sh` removes the test VM and NIC as well as Firewall, so recreate the VM when starting this phase in a later session; its NIC is required for effective-route inspection. Gateway provisioning can take a long time and both gateways are billed while present. Inspect peering gateway transit and effective routes, then remove them immediately.
 
 ### Security subscription
 
@@ -323,19 +343,22 @@ Follow [the Azure Pipelines lab](azure-devops/README.md). For an enterprise impl
 ## 10. Cleanup
 
 ```bash
-./scripts/nuke-everything.sh
+./scripts/nuke-everything.sh --mode multi
 ```
 
 This destroys Platform first and Governance second. It deliberately retains the bootstrap storage and subscriptions. Delete the state store only after both state files are no longer needed; cancel or reuse subscriptions through the billing process rather than treating them as ordinary Terraform resources.
 
 # Part 3: Official Accelerator path
 
-After completing the smaller manual implementation, clean it up and follow the [Microsoft ALZ IaC Accelerator hands-on lab](docs/05-alz-accelerator.md). The official `Deploy-Accelerator` command is the canonical final path. The repository helpers are optional safety wrappers around the official `New-AcceleratorFolderStructure` and `Deploy-Accelerator` commands:
+The official path has a subscription gate. Do not bypass it by reusing one subscription ID for several platform roles:
 
-```powershell
-# Canonical final path, after the manual resources have been cleaned up.
-Deploy-Accelerator
-```
+| Available platform subscriptions | Accelerator action |
+|---|---|
+| One | Generate and review official configuration only. Do not run `Deploy-Accelerator` or Phase 3 apply; keep actual Azure deployment on this repository's single-subscription track. |
+| Management + Connectivity | Use official SMB scenario 10 or 11 through the official workflow. The local wrappers below do not implement the two-subscription model. |
+| Management + Connectivity + Identity + Security | Follow the [full Accelerator hands-on lab](docs/06-alz-accelerator.md). The four IDs supplied to the local wrapper must be distinct. |
+
+After cleaning up the manual implementation and confirming the four-subscription gate, generate a fresh official configuration. The helpers call the official `New-AcceleratorFolderStructure` and `Deploy-Accelerator` commands with additional validation:
 
 ```powershell
 pwsh ./accelerator/prepare-config.ps1 `
@@ -351,13 +374,13 @@ pwsh ./accelerator/prepare-config.ps1 `
 pwsh ./accelerator/deploy-accelerator.ps1
 ```
 
-The manual Terraform roots are the learning phase; the official Accelerator is the final platform phase. Do not let both manage the same hierarchy or resources. The Accelerator guide starts with the cleanup gate, then covers the official local workflow, Azure DevOps exercise, full Hub-Spoke scenario, upgrade discipline and two-stage cleanup procedure.
+The manual Terraform roots and Accelerator are separate implementations. Do not let both manage the same hierarchy or resources. The [Accelerator guide](docs/06-alz-accelerator.md) covers the one-subscription review-only exercise, two-subscription SMB route, full four-subscription workflow, cost approvals, upgrades and two-stage cleanup.
 
 ## Production gaps and next extensions
 
 The lab is enterprise-shaped, not production-ready. A production program should evaluate:
 
-- Promotion of the [Accelerator exercise](docs/05-alz-accelerator.md) into a reviewed platform repository with pinned versions, release management and environment-specific approvals.
+- Promotion of the [Accelerator exercise](docs/06-alz-accelerator.md) into a reviewed platform repository with pinned versions, release management and environment-specific approvals.
 - Entra groups, PIM, access reviews, break-glass accounts, custom roles, and separation of platform identities.
 - Azure Policy initiatives, assignment archetypes, automated remediation and expiring exemptions.
 - Defender for Cloud, Sentinel data connectors, Key Vault, customer-managed keys and security incident integration.

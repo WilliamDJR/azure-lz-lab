@@ -2,188 +2,281 @@
 
 [中文版](02-networking_cn.md)
 
-> This chapter covers Hub-Spoke, ExpressRoute, VPN, Private Endpoints, and the routing behavior that connects them. Read it alongside `terraform/20-platform/` and `scripts/show-effective-routes.sh`.
-
----
+This chapter explains the network mechanisms used by `terraform/20-platform/`: Hub-Spoke topology, effective routes, Azure Firewall, VPN/ExpressRoute gateway transit, Private Endpoint and Private DNS. The same packet and DNS behavior can be tested in both repository tracks. In the single-subscription track, provider aliases point to one subscription and resource groups are only logical boundaries; they do not reproduce cross-subscription access or failure isolation.
 
 ## 1. Why Azure uses Hub-Spoke
 
-GCP has **Shared VPC**: a host project owns a network and service projects place workloads directly in its subnets. Azure has no direct equivalent. Each VNet is an independent network object, and connectivity between VNets uses peering.
+Azure VNets are independent network objects. VNet peering connects two VNets, but peering is non-transitive:
 
-The governing rule is:
+```text
+Spoke A <-> Hub <-> Spoke B
 
-> **VNet peering is non-transitive.** If A can reach Hub and B can reach Hub, A still cannot automatically reach B.
+The two peerings do not automatically create Spoke A <-> Spoke B reachability.
+```
 
-There are three common ways to provide spoke-to-spoke connectivity:
+Common ways to provide broader connectivity are:
 
-| Option | Implementation | Best fit |
+| Pattern | Mechanism | Typical use |
 |---|---|---|
-| **NVA plus UDR in the hub** (this lab) | Spoke route tables direct traffic to Azure Firewall, which forwards it to the other spoke | Standard enterprise design with centralized inspection and logging |
-| **Azure Virtual WAN** | A Microsoft-managed hub provides routing and large-scale branch connectivity | Many sites, multiple regions, or route-table operations becoming a bottleneck |
-| **Direct spoke peering** | Peer selected spokes to each other | A small number of latency-sensitive pairs; it becomes O(n²) at scale |
+| Hub NVA plus UDRs | Spoke route tables send selected traffic to Azure Firewall or another NVA in the hub | Central inspection and auditable egress |
+| Azure Virtual WAN | Microsoft-managed hubs and routing | Large branch or multi-region estates |
+| Direct spoke peering | Peer selected spokes to each other | A small number of latency-sensitive paths |
 
-The design principle is that shared, expensive services live in the hub, while workloads remain isolated in their own subscriptions and VNets.
+Direct spoke peering grows rapidly as the number of VNets increases. A central hub or Virtual WAN is normally easier to govern at scale.
 
-## 2. Routing: the core of the design
+## 2. Routing and effective routes
 
-An Azure effective route table combines **system routes, user-defined routes (UDRs), and BGP-learned routes**.
+Azure calculates a NIC's effective routes from system routes, user-defined routes (UDRs), and routes learned through a virtual network gateway.
 
 ### Route selection
 
-1. **Longest prefix match always wins.** `/24` beats `/16`, which beats `/8`, which beats `0.0.0.0/0`.
-2. For equal prefix lengths, precedence is **UDR > BGP > system route**.
+1. Longest-prefix match wins: `/24` is preferred to `/16`, `/16` to `/8`, and all are preferred to `0.0.0.0/0`.
+2. For equal prefixes, the usual preference is UDR, then BGP, then system route.
 
-### A deliberate example in this lab
+Always inspect the effective route table instead of inferring behavior from one route-table resource.
 
-The route table in `terraform/20-platform/20-spoke.tf` contains `10.0.0.0/8 -> firewall`. It does not force traffic to the hub through the firewall.
+### Deliberate example in this repository
 
-Peering installs a system route such as `10.0.0.0/16 -> VNetPeering` for the hub address space. The `/16` is more specific than the `/8`, so peering wins. The `/8` affects other RFC1918 destinations, such as the simulated on-premises range `10.100.0.0/16`.
+When Firewall is enabled, `terraform/20-platform/20-spoke.tf` adds `10.0.0.0/8 -> VirtualAppliance`. The hub peering also contributes a more specific `10.0.0.0/16 -> VNetPeering` route. The `/16` wins, so that broad `/8` route does not inspect hub-bound traffic. It applies only where no more-specific route wins.
 
-To inspect hub-bound traffic, add a UDR at least as specific as the peering route. Run `scripts/show-effective-routes.sh` to see the merged result directly.
+Run `scripts/show-effective-routes.sh` before and after enabling Firewall and compare the `Address Prefix`, `Next Hop Type`, `Source`, and `State` columns.
 
 ### Forced tunnelling
 
-Attach `0.0.0.0/0 -> VirtualAppliance(<firewall-private-IP>)` to a spoke subnet to send its egress through Azure Firewall.
+A spoke UDR of `0.0.0.0/0 -> VirtualAppliance(<firewall-private-ip>)` sends general outbound traffic through the hub firewall. Two safety rules matter:
 
-Two important constraints:
+- Do not place a self-referencing default route on `AzureFirewallSubnet`; it can create a routing loop.
+- Do not place `0.0.0.0/0` on `GatewaySubnet`. Gateway-subnet route changes require the supported ExpressRoute/VPN design because an invalid route can disrupt the gateway control plane.
 
-1. Never attach a `0.0.0.0/0` UDR to `AzureFirewallSubnet`; the firewall can route traffic back to itself and break egress.
-2. UDRs on `GatewaySubnet` can steer inbound on-premises traffic through inspection, but incorrect routes can disrupt the gateway control plane. Do not place `0.0.0.0/0` on `GatewaySubnet`.
+Do not design around Azure's implicit default outbound access. For API versions released after 31 March 2026, new VNets default to private subnets and need an explicit outbound method such as a NAT Gateway, Load Balancer outbound rule, public IP, or firewall path. The baseline result can therefore depend on the API behavior used by the installed provider; record what the script observes instead of assuming internet access. [Microsoft default outbound access guidance](https://learn.microsoft.com/azure/virtual-network/ip-services/default-outbound-access)
 
-### `bgp_route_propagation_enabled`
+### Gateway route propagation
 
-When gateway route propagation is disabled on a spoke route table, routes learned by the gateway are not injected into that table. On-premises traffic then falls through to the configured default route and can be sent through the firewall. Use this deliberately: it changes how hybrid routes are selected.
+`bgp_route_propagation_enabled` controls whether routes learned by a virtual network gateway are added to the associated subnet's route table. Disabling propagation can make traffic fall through to a UDR, but it can also remove the only route to a hybrid prefix. Change it only with an expected-route table and a rollback plan.
 
 ## 3. Azure Firewall, NSG, and Application Gateway
 
-These controls are complementary, not alternatives:
+These controls operate at different layers:
 
-| | NSG | Azure Firewall | Application Gateway (WAF) |
+| | NSG | Azure Firewall | Application Gateway with WAF |
 |---|---|---|---|
-| Layer | L3/L4 | L3-L7; Premium can perform TLS inspection | L7 HTTP/HTTPS |
-| Placement | Distributed on subnets or NICs | Centralized in the hub | In front of an application |
-| FQDN filtering | No | Yes, through application rules | Yes |
-| Cost model | No separate charge | Hourly plus data processing | Instance and capacity based |
-| Logging | Flow logs must be enabled | Detailed allow/deny logs | Detailed request and WAF logs |
-| Typical role | Microsegmentation | Egress and east-west inspection | Inbound web protection |
+| Primary layer | L3/L4 | L3-L7; Premium supports additional inspection | L7 HTTP/HTTPS |
+| Placement | Subnet or NIC | Central hub | In front of web applications |
+| FQDN rules | No | Yes | Host- and HTTP-aware routing/protection |
+| Cost | No separate NSG charge | Deployment time plus data processing | Instance/capacity based |
+| Typical purpose | Distributed segmentation | Central egress/east-west control | Inbound web delivery and WAF |
 
-Use NSGs to express which subnets or NICs can communicate. Use Azure Firewall for centralized FQDN filtering, threat intelligence, and auditable traffic decisions. Use Application Gateway/WAF for HTTP-aware inbound protection.
+Use NSGs for subnet/NIC communication boundaries, Azure Firewall for centralized network and application rules, and Application Gateway/WAF for inbound HTTP controls.
 
 ### Firewall Policy inheritance
 
-A common production model is for the security team to own a **parent policy** containing mandatory baselines, deny rules, and threat-intelligence settings. Regional firewalls use child policies, where delegated teams can add rules without modifying the baseline.
+A common operating model gives the security team a parent Firewall Policy containing mandatory rules and threat-intelligence settings. Regional or delegated child policies can add permitted local rules without replacing the central baseline. The repository deploys one policy; parent/child delegation remains a production extension.
 
-## 4. ExpressRoute
+## 4. ExpressRoute and the VPN simulation
 
-ExpressRoute requires a physical service-provider circuit, so the lab cannot deploy one. It can still reproduce the Azure-side gateway transit and route-propagation behavior by using VPN gateways.
-
-### Architecture
+ExpressRoute needs a provider circuit, so this repository does not create one. It uses VPN gateways to demonstrate Azure-side gateway transit and effective-route behavior.
 
 ```text
-Your datacenter/colo ---- provider network ---- MSEE ---- Microsoft backbone
-      CE router          carrier/exchange      redundant Microsoft edge routers
+Datacenter/colo ---- provider network ---- Microsoft Enterprise Edge ---- Azure backbone
+      CE router          carrier/exchange          redundant edge routers
 ```
 
-- A **circuit** is the logical service with a bandwidth and a Local, Standard, or Premium SKU.
-- Production connectivity uses a redundant pair; the ExpressRoute SLA assumes redundancy.
-- **Private peering** reaches private IPs in VNets.
-- **Microsoft peering** reaches selected Microsoft public services over advertised public prefixes without traversing the public internet. The former Public peering option is retired.
-- **Local** is limited to supported regions in the local metro, **Standard** covers the relevant geopolitical region, and **Premium** expands global reach, route scale, and VNet limits.
-- **Global Reach** connects two on-premises sites across Microsoft's backbone.
-- **FastPath** allows the data path to bypass the ExpressRoute gateway for higher throughput and lower latency, subject to feature constraints.
-- A VPN backup path is a common resilience design. BGP attributes determine which path is preferred.
+- An ExpressRoute circuit is a logical service with bandwidth and a Local, Standard, or Premium SKU.
+- Production designs use redundant connections and validate both paths.
+- Private peering connects private VNet address spaces.
+- Microsoft peering reaches supported Microsoft public services over advertised public prefixes; the former Public peering option is retired.
+- Local, Standard, and Premium have different geographic reach, route scale, and connection limits.
+- Global Reach connects supported on-premises sites through Microsoft's backbone.
+- FastPath can bypass the gateway in the data path for supported configurations.
+- A VPN backup path is a common resilience option, but route preference and failover must be tested.
 
 ### Behavior from the spoke
 
-ExpressRoute and VPN gateways both reside in `GatewaySubnet`, inject routes toward spokes, and require:
+Both VPN and ExpressRoute gateways use `GatewaySubnet` and can advertise remote prefixes to a spoke. Hub peering uses `allow_gateway_transit = true`; spoke peering uses `use_remote_gateways = true`. The VPN exercise demonstrates those Azure-side controls, but it does not reproduce an ExpressRoute provider circuit, SLA, Microsoft peering, or FastPath.
 
-- Hub peering: `allow_gateway_transit = true`
-- Spoke peering: `use_remote_gateways = true`
-
-This is why the VPN scenario in `terraform/20-platform/40-vpn-and-onprem.tf` is useful: from the spoke's routing perspective it demonstrates the same gateway-transit mechanics.
+The simulated on-premises topology contains a second VNet, two VPN gateways, and two VNet-to-VNet connections. It currently has no VM or other endpoint in the simulated on-premises workload subnet. Therefore its valid evidence is gateway connection state and learned/effective routes, not end-to-end application traffic.
 
 ## 5. Private Endpoint and DNS
 
 ### Resolution path
 
 ```text
-1. The client resolves myaccount.blob.core.windows.net.
-2. Public Azure DNS returns a CNAME:
-     myaccount.blob.core.windows.net
-       -> myaccount.privatelink.blob.core.windows.net
+1. A client resolves myaccount.blob.core.windows.net.
+2. Public Azure DNS returns a CNAME to
+   myaccount.privatelink.blob.core.windows.net.
 3. A private DNS zone named privatelink.blob.core.windows.net is linked to
-   the client's VNet, so the second name is resolved privately.
-4. The A record created by the private endpoint DNS zone group returns 10.1.1.x.
-5. The client connects to 10.1.1.x over the VNet, without using the internet.
+   the client's VNet.
+4. The Private Endpoint DNS zone group maintains an A record such as 10.1.1.x.
+5. The client connects to that private address over the VNet.
 ```
 
-If the VNet link or private record is missing, the name can still resolve through public DNS, but it resolves to a public endpoint and the connection fails when public network access is disabled. A missing VNet link is therefore the first thing to check when DNS succeeds but connectivity fails.
+If the zone link or private record is missing, the name can resolve to a public address. In this repository the Storage account has public network access disabled, so that public connection fails closed. A successful DNS query by itself therefore does not prove that the private path is correct.
 
-`scripts/test-private-dns.sh` shows the chain from the test VM. The lab then removes the VNet link deliberately so you can compare the private and public answers.
+### Service-specific zone names
 
-### Private DNS zone names are service-specific
-
-| Service | Private DNS zone |
+| Service | Common private DNS zone |
 |---|---|
 | Blob Storage | `privatelink.blob.core.windows.net` |
 | Key Vault | `privatelink.vaultcore.azure.net` |
-| Azure SQL | `privatelink.database.windows.net` |
-| AKS API server | `privatelink.<region>.azmk8s.io` |
+| Azure SQL Database | `privatelink.database.windows.net` |
 | Azure Container Registry | `privatelink.azurecr.io` |
 
-An incorrect zone name fails silently from the application's perspective.
+Use the current Microsoft Private Link DNS reference for the exact service and cloud. An incorrect zone name or subresource produces an incomplete resolution path.
 
-### Enterprise DNS design
+### Central DNS design
 
-Keep private DNS zones centrally in the Connectivity subscription, link them to the relevant spokes, and automate endpoint registration through DNS zone groups and policy. Letting every application team create its own copy leads to conflicts and stale A records.
+In the multi-subscription target, private DNS zones live in Connectivity and are linked to approved spokes. In the single-subscription track, the same resources live in the logical Connectivity resource group. The DNS behavior is the same, but subscription-level ownership and RBAC separation are not.
 
-This lab follows that model: `50-private-link.tf` creates the zone in the connectivity resource group.
+At scale, automate zone links and record registration, and define ownership for duplicate zones, stale records, and application-team requests.
 
 ### Private Endpoint versus Service Endpoint
 
-- A **Service Endpoint** extends subnet identity to a PaaS service. The service still uses a public address, although traffic remains on the Microsoft backbone. It cannot be reached from on-premises in the same way and has no Private Link DNS requirement.
-- A **Private Endpoint** allocates a real private IP in your VNet for a PaaS subresource. It can be reached over VPN or ExpressRoute and is charged by endpoint and data usage.
+- A Service Endpoint lets a PaaS service authorize traffic from selected VNet subnets while the service keeps its public endpoint addressing.
+- A Private Endpoint places a private IP for a specific PaaS subresource in the VNet and introduces Private Link DNS requirements.
 
-Private Endpoint is the usual choice where private addressing and hybrid access are required.
+Select between them from access, hybrid-connectivity, DNS, exfiltration, cost, and service-support requirements. Private Endpoint is appropriate when the service must be reached through private addressing from Azure or hybrid networks.
 
-### `168.63.129.16`
+### `168.63.129.16` and DNS Private Resolver
 
-This Azure platform virtual IP provides services including DNS, DHCP, load-balancer health probes, and VM agent communication. Azure-provided DNS uses this address inside every VNet. Blocking DNS to it breaks name resolution; the lab firewall policy explicitly allows port 53 to this address.
+`168.63.129.16` is an Azure platform virtual IP used for services including Azure-provided DNS and VM-agent communication. Do not block platform dependencies without checking the documented NSG, route, firewall, and guest-OS behavior.
 
-### Azure DNS Private Resolver
+Azure DNS Private Resolver provides managed inbound and outbound DNS endpoints for hybrid resolution. An on-premises resolver can conditionally forward Azure private-zone queries to an inbound endpoint in the hub. This repository explains the pattern but does not deploy the resolver because it adds cost.
 
-DNS Private Resolver is the managed answer to hybrid private DNS. An inbound endpoint in the hub allows on-premises resolvers to conditionally forward Azure private-zone queries into Azure. It replaces the common pattern of self-managed DNS forwarder VMs. The lab does not deploy it because it has an additional cost.
+## 6. Hands-on workflow
 
-## 6. Hands-on checklist
+Run commands from the repository root. Complete the platform baseline first and keep `enable_test_vm = true` while using the validation scripts.
+
+Choose exactly one manifest for the active route and keep the export in the same shell. The path is relative to `terraform/20-platform/`, which is where both `terraform -chdir` and the helper scripts evaluate it.
+
+Multi-subscription route:
+
+```bash
+export SUBSCRIPTION_VAR_FILE='../subscriptions.tfvars'
+```
+
+Single-subscription route:
+
+```bash
+export SUBSCRIPTION_VAR_FILE='../subscriptions.single.tfvars'
+```
+
+Do not use the multi-subscription manifest with the single-mode state, or the single-subscription manifest with the multi-mode state.
 
 ### Phase 1: low-cost baseline
 
-- [ ] Apply the baseline topology with the optional firewall and gateways disabled.
-- [ ] Run `scripts/show-effective-routes.sh` and save the baseline.
-- [ ] Run `scripts/test-private-dns.sh` and inspect the CNAME chain.
-- [ ] Remove `azurerm_private_dns_zone_virtual_network_link.blob_to_spoke`, rerun the DNS test, and observe the public result.
-- [ ] Run `terraform apply` to restore the link and verify private resolution.
+The baseline is cost-controlled, not free. It can include a small VM, OS disk, Log Analytics ingestion, Storage, and a Private Endpoint.
 
-### Phase 2: firewall session
+```bash
+./scripts/show-effective-routes.sh | tee /tmp/alz-routes-baseline.txt
+./scripts/test-private-dns.sh
+./scripts/test-egress.sh
+```
 
-- [ ] Set `enable_firewall = true` and apply.
-- [ ] Save and diff the effective route table; identify routes with a `User` source.
-- [ ] From the VM, verify that `https://github.com` is allowed and an unlisted destination is denied.
-- [ ] Query the denied request in Log Analytics:
+Expected observations:
 
-  ```kusto
-  AZFWApplicationRule
-  | where TimeGenerated > ago(30m)
-  | project TimeGenerated, SourceIp, Fqdn, Action, Rule
-  | order by TimeGenerated desc
-  ```
+- The Storage FQDN resolves through its CNAME to the Terraform output `private_endpoint_ip`.
+- The test VM NIC has system and peering routes but no Firewall UDR.
+- Before Firewall is enabled, the egress test records whether the subnet has implicit outbound access. On a private-by-default subnet, both public tests can fail until an explicit outbound method is added.
 
-- [ ] Run `scripts/destroy-expensive.sh` immediately afterward.
+Run the controlled DNS failure only after the successful baseline:
 
-### Phase 3: simulated hybrid connectivity
+```bash
+terraform -chdir=terraform/20-platform destroy \
+  -var-file="$SUBSCRIPTION_VAR_FILE" \
+  -target=azurerm_private_dns_zone_virtual_network_link.blob_to_spoke
 
-- [ ] Set `enable_vpn_gateway = true` and `enable_simulated_onprem = true`.
-- [ ] Wait for both gateway connections to reach `Connected`.
-- [ ] Run `show-effective-routes.sh` and identify `VirtualNetworkGateway` routes.
-- [ ] Test traffic from the spoke toward the simulated on-premises range.
-- [ ] Run `scripts/destroy-expensive.sh` immediately afterward.
+./scripts/test-private-dns.sh
+
+terraform -chdir=terraform/20-platform apply \
+  -var-file="$SUBSCRIPTION_VAR_FILE"
+
+./scripts/test-private-dns.sh
+```
+
+DNS caching and Azure propagation can delay the changed answer. Wait and retry before concluding that the link removal or restoration failed. Use `-target` only for this controlled exercise.
+
+### Phase 2: Firewall session
+
+Set `enable_firewall = true`, review the plan, and apply:
+
+```bash
+terraform -chdir=terraform/20-platform plan \
+  -var-file="$SUBSCRIPTION_VAR_FILE" \
+  -out=tfplan
+terraform -chdir=terraform/20-platform show tfplan
+terraform -chdir=terraform/20-platform apply tfplan
+
+./scripts/show-effective-routes.sh | tee /tmp/alz-routes-firewall.txt
+diff -u /tmp/alz-routes-baseline.txt /tmp/alz-routes-firewall.txt
+./scripts/test-egress.sh
+```
+
+`github.com` should match the allowed application rule; the unlisted test destination should be blocked. Confirm the cause in Log Analytics rather than treating a timeout alone as proof:
+
+```kusto
+AZFWApplicationRule
+| where TimeGenerated > ago(30m)
+| project TimeGenerated, SourceIp, Fqdn, Action, Rule
+| order by TimeGenerated desc
+```
+
+End the paid session immediately:
+
+```bash
+./scripts/destroy-expensive.sh
+```
+
+The cleanup script also removes the private test VM and its NIC. Return the cost switches in `terraform/20-platform/terraform.tfvars` to `false` so a later apply does not recreate them unintentionally.
+
+### Phase 3: simulated hybrid routing
+
+Run this phase only after cost approval. The previous cleanup removed the NIC needed by `show-effective-routes.sh`, so explicitly recreate the test VM for this phase. Keep Firewall disabled, set both gateway switches to `true`, and set a local `vpn_shared_key` of at least 16 characters:
+
+```hcl
+enable_firewall         = false
+enable_vpn_gateway      = true
+enable_simulated_onprem = true
+enable_test_vm          = true
+vpn_shared_key          = "<local-value-at-least-16-characters>"
+```
+
+Review and apply with the active route manifest:
+
+```bash
+terraform -chdir=terraform/20-platform plan \
+  -var-file="$SUBSCRIPTION_VAR_FILE" \
+  -out=tfplan
+terraform -chdir=terraform/20-platform show tfplan
+terraform -chdir=terraform/20-platform apply tfplan
+```
+
+After provisioning completes, verify both subscriptions used by the provider aliases. In single-subscription mode the two IDs are identical and the second query is intentionally redundant:
+
+```bash
+CONNECTIVITY_SUB=$(terraform -chdir=terraform/20-platform output -raw connectivity_subscription_id)
+SANDBOX_SUB=$(terraform -chdir=terraform/20-platform output -raw sandbox_subscription_id)
+
+az network vpn-connection list \
+  --subscription "$CONNECTIVITY_SUB" \
+  --query '[].{name:name,resourceGroup:resourceGroup,status:connectionStatus}' \
+  --output table
+
+az network vpn-connection list \
+  --subscription "$SANDBOX_SUB" \
+  --query '[].{name:name,resourceGroup:resourceGroup,status:connectionStatus}' \
+  --output table
+
+./scripts/show-effective-routes.sh
+```
+
+Collect evidence of `Connected` gateway connections and `VirtualNetworkGateway` routes. Do not claim an application connectivity test because the simulated on-premises subnet has no endpoint. Then remove the gateways and test VM:
+
+```bash
+./scripts/destroy-expensive.sh
+```
+
+Restore `enable_vpn_gateway`, `enable_simulated_onprem` and `enable_test_vm` to `false` in `terraform/20-platform/terraform.tfvars`.
+
+---
+
+Next: [03-azure-devops.md](03-azure-devops.md) — platform delivery and operations

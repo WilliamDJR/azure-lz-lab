@@ -14,7 +14,7 @@ resource "azurerm_resource_group" "landing_zone" {
 
   name     = "rg-${var.prefix}-corp-app1-${var.location}"
   location = var.location
-  tags     = var.tags
+  tags     = local.role_tags.corp_dev
 }
 
 resource "azurerm_virtual_network" "spoke" {
@@ -24,7 +24,7 @@ resource "azurerm_virtual_network" "spoke" {
   resource_group_name = azurerm_resource_group.landing_zone.name
   location            = azurerm_resource_group.landing_zone.location
   address_space       = [var.spoke_address_space]
-  tags                = var.tags
+  tags                = local.role_tags.corp_dev
 }
 
 resource "azurerm_subnet" "workload" {
@@ -67,7 +67,7 @@ resource "azurerm_network_security_group" "workload" {
   name                = "nsg-${var.prefix}-corp-workload"
   resource_group_name = azurerm_resource_group.landing_zone.name
   location            = azurerm_resource_group.landing_zone.location
-  tags                = var.tags
+  tags                = local.role_tags.corp_dev
 
   security_rule {
     name                       = "AllowVnetInbound"
@@ -108,10 +108,11 @@ resource "azurerm_subnet_network_security_group_association" "workload" {
 #
 # This is the heart of hub-and-spoke and the thing most people get wrong.
 #
-# Azure's default system routes send 0.0.0.0/0 straight out to the internet
-# from any subnet. To make traffic traverse the firewall you must OVERRIDE that
-# with a user-defined route pointing at the firewall's PRIVATE ip as a
-# VirtualAppliance next hop.
+# Azure still supplies a 0.0.0.0/0 system route, but new virtual networks
+# created with API versions after 31 March 2026 use private subnets by default
+# and no longer receive implicit outbound SNAT. To make the path explicit and
+# send egress through the firewall, override the system route with a UDR that
+# points at the firewall's private IP as a VirtualAppliance next hop.
 #
 # Two traps:
 #   1. Setting a 0.0.0.0/0 UDR on the AzureFirewallSubnet itself creates a
@@ -132,7 +133,7 @@ resource "azurerm_route_table" "spoke" {
   resource_group_name           = azurerm_resource_group.landing_zone.name
   location                      = azurerm_resource_group.landing_zone.location
   bgp_route_propagation_enabled = true
-  tags                          = var.tags
+  tags                          = local.role_tags.corp_dev
 
   route {
     name                   = "default-to-firewall"

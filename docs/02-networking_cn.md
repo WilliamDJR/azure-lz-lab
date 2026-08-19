@@ -1,217 +1,282 @@
-# 02 · 企业级 Azure 网络深挖
+# 02 · 企业级 Azure 网络
 
 [English](02-networking.md)
 
-> JD 原文点名的四项：**Hub & Spoke、ExpressRoute、VPN、Private Endpoints**。
-> 这一篇覆盖全部，加上路由——路由是真正决定你能不能通过技术面的部分。
-> 配合 `terraform/20-platform/` 和 `scripts/show-effective-routes.sh`。
+本章说明 `terraform/20-platform/` 使用的网络机制：Hub-Spoke、有效路由、Azure Firewall、VPN/ExpressRoute Gateway Transit、Private Endpoint 和 Private DNS。仓库的两条路线都能验证相同的报文与 DNS 行为。在单订阅路线中，Provider Alias 指向同一个订阅，资源组也只是逻辑边界，不能模拟跨订阅访问控制和故障隔离。
 
----
+## 1. 为什么使用 Hub-Spoke
 
-## 1. 为什么 Azure 必须搞 Hub-Spoke
+Azure VNet 是彼此独立的网络对象。VNet Peering 可以连接两个 VNet，但 Peering 不具备传递性：
 
-GCP 有 **Shared VPC**：一个宿主项目持有网络，多个服务项目直接在里面开子网。一张网，天然互通。
+```text
+Spoke A <-> Hub <-> Spoke B
 
-**Azure 没有这个东西。** 每个订阅里的 VNet 都是独立的网络对象。要让它们互通只能 **peering**，而 peering 有一条铁律：
+这两条 Peering 不会自动产生 Spoke A <-> Spoke B 可达性。
+```
 
-> **VNet peering 不传递（non-transitive）。**
-> A↔Hub 通，B↔Hub 通，**A↔B 不通**。
+常见的扩展连接方式包括：
 
-这一条决定了 Azure 企业网络的整个形态。想让 spoke 之间互通，只有三条路：
-
-| 方案 | 做法 | 适用 |
+| 模式 | 机制 | 常见用途 |
 |---|---|---|
-| **Hub 里放 NVA + UDR**（本 lab） | spoke 的路由表把流量指向 hub 里的 Azure Firewall，防火墙转发到另一个 spoke | 标准企业做法，流量可审计可管控 |
-| **Azure Virtual WAN** | 微软托管的 hub，自带路由服务，支持大规模分支接入 | 站点很多、全球多区域、不想自己管路由 |
-| **spoke 直接 peering** | 两两互联 | 只在极少数、延迟敏感的场景用；VNet 数一多就是 O(n²) 灾难 |
+| Hub NVA 加 UDR | Spoke 路由表把指定流量发送到 Hub 中的 Azure Firewall 或其他 NVA | 集中检查与可审计出口 |
+| Azure Virtual WAN | Microsoft 托管 Hub 与路由 | 大量分支或多区域环境 |
+| Spoke 直接 Peering | 只把部分 Spoke 两两连接 | 少量对延迟敏感的路径 |
 
-设计结论：由于 VNet peering 不传递，spoke-to-spoke 流量需要经过 Hub 中的 Azure Firewall 或其他 NVA，并由 Spoke 子网的 UDR 指定下一跳。规模较大、路由表维护成为瓶颈时，可以评估 Virtual WAN。
+直接 Spoke Peering 的连接数量会随 VNet 数量快速增长。规模扩大后，中央 Hub 或 Virtual WAN 通常更容易治理。
 
----
+## 2. 路由与有效路由
 
-## 2. 路由：整个话题的核心
+Azure 根据系统路由、用户定义路由（UDR）和 Virtual Network Gateway 学到的路由，计算网卡的有效路由。
 
-Azure 的有效路由 = **系统路由 + UDR + BGP 学到的路由** 三者合并。
+### 路由选择
 
-### 匹配规则（必须能脱口而出）
+1. 最长前缀匹配优先：`/24` 优先于 `/16`，`/16` 优先于 `/8`，以上均优先于 `0.0.0.0/0`。
+2. 前缀相同时，通常按 UDR、BGP、系统路由的顺序选择。
 
-1. **最长前缀匹配永远优先。** `/24` 打败 `/16` 打败 `/8` 打败 `0.0.0.0/0`。
-2. **前缀长度相同**时，优先级：**UDR > BGP > 系统路由**。
+应检查最终有效路由表，而不是只根据某一张 Route Table 推断真实行为。
 
-第 2 条是很多人答不上来的。
+### 仓库中的验证示例
 
-### 一个真实的坑（本 lab 里就有）
+启用 Firewall 后，`terraform/20-platform/20-spoke.tf` 会增加 `10.0.0.0/8 -> VirtualAppliance`。Hub Peering 同时提供更具体的 `10.0.0.0/16 -> VNetPeering` 路由，因此 `/16` 获胜；宽泛的 `/8` 不会检查前往 Hub 的流量，只会在没有更具体路由时生效。
 
-`terraform/20-platform/20-spoke.tf` 的路由表里有一条 `10.0.0.0/8 → 防火墙`。你可能以为这会让 spoke 去 hub 的流量也走防火墙——**不会**。
+启用 Firewall 前后分别运行 `scripts/show-effective-routes.sh`，对比 `Address Prefix`、`Next Hop Type`、`Source` 和 `State`。
 
-因为 peering 给 spoke 装了一条系统路由 `10.0.0.0/16 → VNetPeering`（hub 的地址空间），`/16` 比 `/8` 更具体，所以 peering 赢。那条 `/8` 只对**其他** RFC1918 网段生效（比如模拟的本地 `10.100.0.0/16`）。
+### 强制隧道
 
-想让去 hub 的流量也被检查，你必须写一条**至少同样具体**的 UDR。
+Spoke 上的 `0.0.0.0/0 -> VirtualAppliance(<firewall-private-ip>)` UDR 会把常规出站流量送到 Hub Firewall。需要遵守两个安全规则：
 
-跑 `scripts/show-effective-routes.sh` 亲眼看一遍。这个实验做过一次，你答路由题就再也不会心虚。
+- 不要在 `AzureFirewallSubnet` 上配置指回防火墙自身的默认路由，否则可能形成路由环路。
+- 不要在 `GatewaySubnet` 上配置 `0.0.0.0/0`。Gateway Subnet 的路由修改必须符合受支持的 ExpressRoute/VPN 设计，错误路由可能破坏网关控制平面。
 
-### 强制隧道（forced tunnelling）
+不要把 Azure 隐式 Default Outbound Access 当作设计前提。对于 2026 年 3 月 31 日之后发布的 API 版本，新 VNet 默认使用 Private Subnet，需要 NAT Gateway、Load Balancer Outbound Rule、公网 IP 或 Firewall 路径等显式出口。基线结果可能受已安装 Provider 使用的 API 行为影响；应记录脚本实际结果，而不是假设一定能访问互联网。[Microsoft Default Outbound Access 指南](https://learn.microsoft.com/azure/virtual-network/ip-services/default-outbound-access)
 
-在 spoke 子网上放 `0.0.0.0/0 → VirtualAppliance(防火墙私有 IP)`，所有出站流量被拉去防火墙检查。
+### Gateway 路由传播
 
-**两个致命陷阱：**
+`bgp_route_propagation_enabled` 控制 Virtual Network Gateway 学到的路由是否进入关联子网的 Route Table。关闭传播可以让流量落到 UDR，但也可能移除通往混合网络前缀的唯一有效路由。修改前应先准备预期路由表和回滚方案。
 
-1. **绝不要在 `AzureFirewallSubnet` 上放 `0.0.0.0/0` 的 UDR** —— 防火墙把流量发给自己，路由环路，整个出口瘫痪。
-2. **`GatewaySubnet` 上的 UDR** 用来让本地→spoke 的入向流量也过防火墙。写错了会打断 ExpressRoute 的控制平面。微软明确禁止在 GatewaySubnet 上放 `0.0.0.0/0`。
+## 3. Azure Firewall、NSG 与 Application Gateway
 
-### `bgp_route_propagation_enabled`
+三类控制工作在不同层次：
 
-关掉（Terraform 里设 `false`，对应 Portal 的 "Propagate gateway routes: Disabled"）后，网关从本地学到的 BGP 路由**不会**注入这张路由表。效果是本地网段的流量落到你的 `0.0.0.0/0` 默认路由上，也就是被送去防火墙。这是"让回本地的流量也被检查"的标准手法。
-
----
-
-## 3. Azure Firewall vs NSG vs 应用网关
-
-这三种控制并不是替代关系，而是分层协作：
-
-| | NSG | Azure Firewall | Application Gateway (WAF) |
+| | NSG | Azure Firewall | 带 WAF 的 Application Gateway |
 |---|---|---|---|
-| 层级 | L3/L4 | L3–L7（Premium 可 TLS 解密） | L7 HTTP/HTTPS |
-| 位置 | 附在子网或网卡上，分布式执行 | hub 里的集中式实例 | 应用前面 |
-| FQDN 过滤 | ❌ | ✅（应用规则） | ✅ |
-| 成本 | 不单独收费 | 按部署时长并可能包含数据处理费 | 按实例和容量计费 |
-| 日志 | 需开 NSG flow logs，且只有元数据 | 完整的允许/拒绝日志 | 完整 |
-| 典型职责 | 微分段：谁能访问谁 | 出口控制 + 东西向检查 | 入向 Web 防护 |
+| 主要层次 | L3/L4 | L3-L7；Premium 提供额外检查能力 | L7 HTTP/HTTPS |
+| 部署位置 | 子网或网卡 | 中央 Hub | Web 应用之前 |
+| FQDN 规则 | 不支持 | 支持 | 支持主机与 HTTP 感知路由/防护 |
+| 成本 | NSG 无单独费用 | 部署时长加数据处理 | 实例/容量计费 |
+| 典型用途 | 分布式微分段 | 中央出口与东西向控制 | 入向 Web 交付和 WAF |
 
-### 防火墙策略的父子继承
+NSG 负责子网或网卡通信边界，Azure Firewall 负责集中网络与应用规则，Application Gateway/WAF 负责入向 HTTP 控制。
 
-生产环境的正确做法：安全团队拥有**父策略**（基线拒绝、强制允许清单、威胁情报），每个区域的防火墙用**子策略**继承它，应用团队只能在子策略里加规则。
+### Firewall Policy 继承
 
-这种父子策略模式允许应用团队扩展规则，同时保留中央安全基线的控制权。
+一种常见运营模式是由安全团队维护父 Firewall Policy，其中包含强制规则和威胁情报设置。区域或委派团队可以在子 Policy 中添加获准的本地规则，而不替换中央基线。本仓库部署一个 Policy；父子委派属于生产化扩展。
 
----
+## 4. ExpressRoute 与 VPN 模拟
 
-## 4. ExpressRoute
+ExpressRoute 需要服务商电路，因此本仓库不会创建真实电路，而是使用 VPN Gateway 演示 Azure 侧的 Gateway Transit 和有效路由行为。
 
-ExpressRoute 需要连接服务商提供物理电路，因此本实验不直接部署它。实验仍可通过 VPN Gateway 练习 Azure 侧的网关传递、路由传播和冗余设计。
-
-### 必须能讲清楚的结构
-
-```
-你的机房/托管 ──── 服务商网络 ──── MSEE ──── Microsoft 骨干
-   (CE 路由器)      (PCCW/Megaport/    (微软边缘  
-                     Equinix...)        路由器，成对冗余)
+```text
+数据中心/托管机房 ---- 服务商网络 ---- Microsoft Enterprise Edge ---- Azure 骨干网
+      CE 路由器            运营商/交换点             冗余边缘路由器
 ```
 
-- **Circuit（电路）**：逻辑对象，有带宽（50Mbps–100Gbps）和 SKU（Local / Standard / Premium）
-- **永远是一对冗余连接**。单条不是"省钱"，是配置错误——微软的 SLA 只覆盖冗余对。
-- **Peering 类型（务必分清）：**
-  - **Private peering** — 通到你的 VNet（IaaS 私有 IP）。日常说的 ExpressRoute 就是这个。
-  - **Microsoft peering** — 通到微软的公网服务（Microsoft 365、Azure PaaS 公网端点），走公网 IP 但不经互联网。
-  - *（Public peering 已弃用，被 Microsoft peering 取代——知道这点说明你读过近几年的文档。）*
-- **SKU 差异：** Local 只能连同 metro 的 Azure 区域，最便宜；Standard 覆盖同一地缘政治区域；**Premium** 才能跨区域全球连接、支持更多 VNet 连接数和更大路由表。企业选型题基本就在 Standard vs Premium。
-- **ExpressRoute Global Reach**：让两个通过 ExpressRoute 接入的本地站点，借道微软骨干互通——本质上是拿 Azure 当 WAN 用。这是你在运营商世界里最熟悉的那类需求。
-- **FastPath**：让数据面绕过 ExpressRoute 网关，直接进 VNet，降低延迟、提高吞吐。代价是部分功能（早期不支持 UDR/NVA 场景）受限。
-- **ExpressRoute + VPN 做备份**：标准高可用设计，VPN 作为 ExpressRoute 失效时的降级路径，靠 BGP local preference / AS path prepending 控制优先级。**这句话你说出来会非常有说服力，因为这是纯粹的运营商网络知识。**
+- ExpressRoute Circuit 是具有带宽及 Local、Standard 或 Premium SKU 的逻辑服务。
+- 生产设计使用冗余连接，并验证两条路径。
+- Private Peering 连接 VNet 私网地址空间。
+- Microsoft Peering 通过发布的公网前缀访问受支持的 Microsoft 公共服务；原 Public Peering 已停用。
+- Local、Standard 和 Premium 的地理范围、路由规模与连接限制不同。
+- Global Reach 通过 Microsoft 骨干连接受支持的本地站点。
+- FastPath 可在受支持配置中让数据路径绕过 Gateway。
+- VPN 可作为弹性备用路径，但必须验证路由优先级和故障切换。
 
-### 从 spoke 的角度看
+### 从 Spoke 观察
 
-ExpressRoute 网关和 VPN 网关行为几乎一样：都住在 `GatewaySubnet`，都通过 BGP 注入路由，都需要 hub 侧 `allow_gateway_transit = true` + spoke 侧 `use_remote_gateways = true`。
+VPN 与 ExpressRoute Gateway 都使用 `GatewaySubnet`，并可以把远端前缀发布给 Spoke。Hub Peering 使用 `allow_gateway_transit = true`，Spoke Peering 使用 `use_remote_gateways = true`。VPN 实验能验证这些 Azure 侧控制，但不能模拟 ExpressRoute 服务商电路、SLA、Microsoft Peering 或 FastPath。
 
-**这就是本 lab 用 VPN 网关代练的原因**——从 spoke 往下看，两者不可区分。`terraform/20-platform/40-vpn-and-onprem.tf` 里的注释也写了这一点。
+模拟本地拓扑包含第二个 VNet、两个 VPN Gateway 和两条 VNet-to-VNet Connection。目前模拟本地 Workload Subnet 中没有 VM 或其他 Endpoint，因此有效证据是 Gateway Connection 状态和 Learned/Effective Routes，而不是端到端应用流量。
 
----
+## 5. Private Endpoint 与 DNS
 
-## 5. Private Endpoint 与 DNS（最容易翻车，也最能拉分）
+### 解析路径
 
-### 解析链路（必须能一口气讲完）
-
-```
-1. 客户端解析  myaccount.blob.core.windows.net
-2. 公共 Azure DNS 返回 CNAME：
-      myaccount.blob.core.windows.net
-        → myaccount.privatelink.blob.core.windows.net
-3. 因为私有 DNS 区域 privatelink.blob.core.windows.net
-   已经 LINK 到客户端所在的 VNet，第二个名字在私网内解析
-4. 该区域里的 A 记录（由 private endpoint 的 DNS zone group 自动创建）
-   返回 10.1.1.x
-5. 客户端连 10.1.1.x，全程走 VNet，不碰互联网
+```text
+1. 客户端解析 myaccount.blob.core.windows.net。
+2. 公共 Azure DNS 返回指向
+   myaccount.privatelink.blob.core.windows.net 的 CNAME。
+3. 名为 privatelink.blob.core.windows.net 的 Private DNS Zone
+   已链接到客户端 VNet。
+4. Private Endpoint DNS Zone Group 维护 10.1.1.x 一类的 A 记录。
+5. 客户端通过 VNet 连接该私有地址。
 ```
 
-**断掉任何一环的症状都一样：名字还能解析，但解析到公网 IP，然后连接失败。**
+如果缺少 Zone Link 或私有记录，名称可能解析到公网地址。本仓库中的 Storage Account 已关闭 Public Network Access，因此公网连接会失败。DNS 查询成功本身并不能证明私有路径正确。
 
-"能解析但连不上"几乎永远是**私有 DNS 区域没有 link 到那个 VNet**。
+### 服务对应的 Zone 名称
 
-`scripts/test-private-dns.sh` 会带你把这条链路跑一遍，然后**故意删掉 VNet link 再跑一次**，看着答案从私有 IP 变成公网 IP。做过这一次，这道题你永远丢不了分。
-
-### 私有 DNS 区域名不是随便起的
-
-| 服务 | 区域名 |
+| 服务 | 常用 Private DNS Zone |
 |---|---|
-| Blob 存储 | `privatelink.blob.core.windows.net` |
+| Blob Storage | `privatelink.blob.core.windows.net` |
 | Key Vault | `privatelink.vaultcore.azure.net` |
-| Azure SQL | `privatelink.database.windows.net` |
-| AKS API server | `privatelink.<region>.azmk8s.io` |
+| Azure SQL Database | `privatelink.database.windows.net` |
 | Azure Container Registry | `privatelink.azurecr.io` |
 
-写错一个字母，静默失败。
+应根据当前 Microsoft Private Link DNS 参考确认具体服务和云环境。Zone 名称或 Subresource 错误都会造成解析路径不完整。
 
-### 企业里的正确架构
+### 中央 DNS 设计
 
-私有 DNS 区域**集中放在 Connectivity 订阅**，link 到所有 spoke，由平台团队用 Azure Policy（DINE）强制每个新建的 private endpoint 自动注册到中央区域。
+在多订阅目标中，Private DNS Zone 位于 Connectivity 订阅，并链接到获准的 Spoke。在单订阅路线中，相同资源位于逻辑 Connectivity 资源组。DNS 行为相同，但没有订阅级所有权和 RBAC 隔离。
 
-否则每个应用团队各建各的区域，很快就会出现同名冲突和陈旧 A 记录指向已回收私有 IP 的问题。
+规模扩大后，应自动化 Zone Link 和记录注册，并明确重复 Zone、陈旧记录和应用团队请求的处理责任。
 
-本 lab 就是这么做的：区域建在 connectivity 资源组里（`50-private-link.tf`）。
+### Private Endpoint 与 Service Endpoint
 
-### Private Endpoint vs Service Endpoint
+- Service Endpoint 允许 PaaS 服务授权来自指定 VNet Subnet 的流量，服务仍使用公网 Endpoint 地址。
+- Private Endpoint 在 VNet 中为特定 PaaS Subresource 放置私有 IP，并引入 Private Link DNS 配置要求。
 
-还会被问到的一对：
+选型时应同时考虑访问方式、混合连接、DNS、数据泄露防护、成本和服务支持情况。需要从 Azure 或混合网络通过私有地址访问服务时，Private Endpoint 更合适。
 
-- **Service Endpoint**：把子网的身份带给 PaaS 服务，PaaS 侧按子网做访问控制。流量还是走公网 IP 空间，只是不出微软骨干。**不能**从本地访问，不解决 DNS 问题，免费。
-- **Private Endpoint**：在你的 VNet 里给 PaaS 服务分配一个**真实私有 IP**。可以从本地经 ExpressRoute/VPN 访问。按小时+流量计费。
+### `168.63.129.16` 与 DNS Private Resolver
 
-**现代企业基本一律用 Private Endpoint**，Service Endpoint 是遗留方案。
+`168.63.129.16` 是 Azure 平台虚拟 IP，用于 Azure-provided DNS、VM Agent 通信等服务。阻断平台依赖前，应检查 Microsoft 对 NSG、路由、防火墙和 Guest OS 的说明。
 
-### 168.63.129.16
+Azure DNS Private Resolver 通过托管 Inbound/Outbound Endpoint 支持混合 DNS。On-premises Resolver 可以把 Azure Private Zone 查询条件转发到 Hub 中的 Inbound Endpoint。本仓库说明该模式，但因额外成本不部署 Resolver。
 
-这个地址要认识。它是 Azure 平台在**每一个 VNet** 里都存在的魔法地址，承担 DNS 解析、DHCP、负载均衡健康探测、VM agent 心跳。私有 DNS 区域能生效，就是因为 VM 默认把 DNS 指向它。
+## 6. 实验流程
 
-如果你在防火墙上把它的 53 端口封了，整个 VNet 的名字解析就断了——`30-firewall.tf` 里那条 `allow-dns-out` 规则就是为此存在。
+从仓库根目录运行命令。先完成 Platform 基线，并在使用验证脚本期间保持 `enable_test_vm = true`。
 
-### Azure DNS Private Resolver
+必须为当前路线选择且只选择一个 Manifest，并在同一个 Shell 中保留该 Export。路径相对于 `terraform/20-platform/`；`terraform -chdir` 和辅助脚本都会在该目录解析它。
 
-本 lab 没部署（要额外收费），但要知道它解决什么问题：**让本地 DNS 服务器能解析 Azure 私有区域**。
+多订阅路线：
 
-在有 ExpressRoute 的混合环境里，本地机器也要访问 private endpoint，就需要在 hub 里放一个 inbound endpoint，本地 DNS 条件转发过来。以前大家用一对自建 DNS 转发 VM 做这件事，Private Resolver 是它的托管替代品。
+```bash
+export SUBSCRIPTION_VAR_FILE='../subscriptions.tfvars'
+```
 
-在混合环境中，本地 DNS 可以通过条件转发把私有区域查询转发到 Hub 中 DNS Private Resolver 的 inbound endpoint。
+单订阅路线：
+
+```bash
+export SUBSCRIPTION_VAR_FILE='../subscriptions.single.tfvars'
+```
+
+不要让多订阅 Manifest 指向单订阅 State，也不要让单订阅 Manifest 指向多订阅 State。
+
+### 第一阶段：低成本基线
+
+基线经过成本控制，但不是免费。它可能包含小型 VM、OS Disk、Log Analytics 采集、Storage 和 Private Endpoint。
+
+```bash
+./scripts/show-effective-routes.sh | tee /tmp/alz-routes-baseline.txt
+./scripts/test-private-dns.sh
+./scripts/test-egress.sh
+```
+
+预期现象：
+
+- Storage FQDN 经过 CNAME 后解析到 Terraform 输出的 `private_endpoint_ip`。
+- 测试 VM 网卡包含系统和 Peering 路由，但还没有 Firewall UDR。
+- 启用 Firewall 前，出口测试用于记录 Subnet 是否仍有隐式出站能力。如果 Subnet 默认为 Private，两个公网测试都可能失败，直到增加显式出口。
+
+成功完成基线后再运行受控 DNS 故障：
+
+```bash
+terraform -chdir=terraform/20-platform destroy \
+  -var-file="$SUBSCRIPTION_VAR_FILE" \
+  -target=azurerm_private_dns_zone_virtual_network_link.blob_to_spoke
+
+./scripts/test-private-dns.sh
+
+terraform -chdir=terraform/20-platform apply \
+  -var-file="$SUBSCRIPTION_VAR_FILE"
+
+./scripts/test-private-dns.sh
+```
+
+DNS Cache 和 Azure 传播可能使解析变化延迟。判断 Link 删除或恢复失败前，应等待并重试。`-target` 只用于这个受控实验。
+
+### 第二阶段：Firewall 实验
+
+设置 `enable_firewall = true`，审查 Plan 后 Apply：
+
+```bash
+terraform -chdir=terraform/20-platform plan \
+  -var-file="$SUBSCRIPTION_VAR_FILE" \
+  -out=tfplan
+terraform -chdir=terraform/20-platform show tfplan
+terraform -chdir=terraform/20-platform apply tfplan
+
+./scripts/show-effective-routes.sh | tee /tmp/alz-routes-firewall.txt
+diff -u /tmp/alz-routes-baseline.txt /tmp/alz-routes-firewall.txt
+./scripts/test-egress.sh
+```
+
+`github.com` 应匹配允许的 Application Rule；未列入清单的测试地址应被阻止。应使用 Log Analytics 确认原因，不能只把 Timeout 当成防火墙证据：
+
+```kusto
+AZFWApplicationRule
+| where TimeGenerated > ago(30m)
+| project TimeGenerated, SourceIp, Fqdn, Action, Rule
+| order by TimeGenerated desc
+```
+
+立即结束收费会话：
+
+```bash
+./scripts/destroy-expensive.sh
+```
+
+该清理脚本也会删除私网测试 VM 及其 NIC。同时把 `terraform/20-platform/terraform.tfvars` 中的成本开关恢复为 `false`，避免后续 Apply 意外重新创建资源。
+
+### 第三阶段：模拟混合网络路由
+
+只有完成成本审批后才运行本阶段。前一步清理已删除 `show-effective-routes.sh` 所需的 NIC，因此本阶段必须显式重建测试 VM。保持 Firewall 关闭，把两个 Gateway 开关设为 `true`，并在本地设置至少 16 个字符的 `vpn_shared_key`：
+
+```hcl
+enable_firewall         = false
+enable_vpn_gateway      = true
+enable_simulated_onprem = true
+enable_test_vm          = true
+vpn_shared_key          = "<local-value-at-least-16-characters>"
+```
+
+使用当前路线的 Manifest 审查并 Apply：
+
+```bash
+terraform -chdir=terraform/20-platform plan \
+  -var-file="$SUBSCRIPTION_VAR_FILE" \
+  -out=tfplan
+terraform -chdir=terraform/20-platform show tfplan
+terraform -chdir=terraform/20-platform apply tfplan
+```
+
+部署完成后验证 Provider Alias 使用的两个订阅。在单订阅模式下两个 ID 相同，因此第二次查询会有意重复：
+
+```bash
+CONNECTIVITY_SUB=$(terraform -chdir=terraform/20-platform output -raw connectivity_subscription_id)
+SANDBOX_SUB=$(terraform -chdir=terraform/20-platform output -raw sandbox_subscription_id)
+
+az network vpn-connection list \
+  --subscription "$CONNECTIVITY_SUB" \
+  --query '[].{name:name,resourceGroup:resourceGroup,status:connectionStatus}' \
+  --output table
+
+az network vpn-connection list \
+  --subscription "$SANDBOX_SUB" \
+  --query '[].{name:name,resourceGroup:resourceGroup,status:connectionStatus}' \
+  --output table
+
+./scripts/show-effective-routes.sh
+```
+
+保存 `Connected` Gateway Connection 和 `VirtualNetworkGateway` 路由证据。由于模拟本地 Subnet 没有 Endpoint，不应声称完成应用连通性测试。随后删除 Gateway 和测试 VM：
+
+```bash
+./scripts/destroy-expensive.sh
+```
+
+把 `terraform/20-platform/terraform.tfvars` 中的 `enable_vpn_gateway`、`enable_simulated_onprem` 和 `enable_test_vm` 恢复为 `false`。
 
 ---
 
-## 6. 动手清单
-
-对照 `terraform/20-platform/`：
-
-**第一阶段（几乎零成本，先做这个）**
-- [ ] apply 基础拓扑（所有开关关闭，只留 test VM）
-- [ ] 跑 `scripts/show-effective-routes.sh`，记下基线路由表
-- [ ] 跑 `scripts/test-private-dns.sh`，看懂 CNAME 链
-- [ ] **故意破坏**：`terraform destroy -target=azurerm_private_dns_zone_virtual_network_link.blob_to_spoke`，再跑一次 DNS 测试，观察解析结果变成公网 IP
-- [ ] `terraform apply` 修回来
-
-**第二阶段（一个下午，用完即拆）**
-- [ ] `enable_firewall = true`，apply
-- [ ] 再跑 `show-effective-routes.sh`，diff 对比——看到 User 来源的路由出现
-- [ ] 在 VM 上 `curl https://github.com`（应该通，防火墙规则允许了）
-- [ ] `curl https://www.reddit.com`（应该被拒——不在允许清单里）
-- [ ] 去 Log Analytics 用 KQL 查那条拒绝记录：
-  ```kusto
-  AZFWApplicationRule
-  | where TimeGenerated > ago(30m)
-  | project TimeGenerated, SourceIp, Fqdn, Action, Rule
-  | order by TimeGenerated desc
-  ```
-- [ ] 跑 `scripts/destroy-expensive.sh`
-
-**第三阶段（一个下午，网关建起来要 40 分钟）**
-- [ ] `enable_vpn_gateway = true` + `enable_simulated_onprem = true`
-- [ ] 在 Portal 看两条连接从 Connecting 变 Connected
-- [ ] 第三次跑 `show-effective-routes.sh`——看到 VirtualNetworkGateway 来源的路由
-- [ ] 从 spoke 的 VM ping 模拟本地网段的地址，验证 gateway transit 生效
-- [ ] `scripts/destroy-expensive.sh`
+下一篇：[03-azure-devops_cn.md](03-azure-devops_cn.md) — 平台交付与运维

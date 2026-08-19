@@ -14,6 +14,16 @@ set -euo pipefail
 cd "$(dirname "$0")/../terraform/20-platform"
 
 TF=${TF:-terraform}
+SUBSCRIPTION_VAR_FILE=${SUBSCRIPTION_VAR_FILE:-}
+
+if [[ -z "$SUBSCRIPTION_VAR_FILE" ]]; then
+  DEPLOYMENT_MODE=$($TF output -raw deployment_mode 2>/dev/null || true)
+  if [[ "$DEPLOYMENT_MODE" == "single-subscription" ]]; then
+    SUBSCRIPTION_VAR_FILE="../subscriptions.single.tfvars"
+  else
+    SUBSCRIPTION_VAR_FILE="../subscriptions.tfvars"
+  fi
+fi
 
 RG=$($TF output -raw landing_zone_resource_group)
 VM=$($TF output -raw test_vm_name)
@@ -37,7 +47,7 @@ az vm run-command invoke \
   --scripts "echo '--- resolv.conf ---'; cat /etc/resolv.conf; echo; echo '--- dig ---'; (command -v dig >/dev/null || (apt-get update -qq && apt-get install -y -qq dnsutils)) >/dev/null 2>&1; dig +noall +answer ${FQDN}; echo; echo '--- getent ---'; getent hosts ${FQDN}" \
   --query "value[0].message" -o tsv
 
-cat <<'EOF'
+cat <<EOF
 
 ------------------------------------------------------------------------------
 How to read this
@@ -57,7 +67,7 @@ makes private zones work at all.
 
 Now break it on purpose:
 
-    terraform destroy -var-file=../subscriptions.tfvars -target=azurerm_private_dns_zone_virtual_network_link.blob_to_spoke
+    terraform destroy -var-file="$SUBSCRIPTION_VAR_FILE" -target=azurerm_private_dns_zone_virtual_network_link.blob_to_spoke
     ./scripts/test-private-dns.sh
 
 The name still resolves - but to a PUBLIC IP. Traffic then fails closed
@@ -65,6 +75,6 @@ because the storage account has public_network_access_enabled = false.
 "It resolves but I cannot connect" is the exact symptom, and a missing VNet
 link is the most common cause of it in real estates.
 
-Put it back with:  terraform apply -var-file=../subscriptions.tfvars
+Put it back with:  terraform apply -var-file="$SUBSCRIPTION_VAR_FILE"
 ------------------------------------------------------------------------------
 EOF

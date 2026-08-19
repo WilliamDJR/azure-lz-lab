@@ -1,5 +1,12 @@
 locals {
-  subscription_budgets = var.budget_start_date == null ? {} : var.subscription_ids
+  # A single-subscription learning track must create one budget, not nine
+  # conflicting budgets. Preserve role keys in multi-subscription mode so an
+  # existing Terraform state does not see every budget address change.
+  subscription_budgets = var.budget_start_date == null ? {} : (
+    var.allow_shared_subscription_ids
+    ? { shared = var.subscription_ids.management }
+    : var.subscription_ids
+  )
 }
 
 resource "azurerm_consumption_budget_subscription" "role" {
@@ -7,8 +14,15 @@ resource "azurerm_consumption_budget_subscription" "role" {
 
   name            = "${var.prefix}-${replace(each.key, "_", "-")}-monthly-budget"
   subscription_id = "/subscriptions/${each.value}"
-  amount          = lookup(var.monthly_budget_overrides, each.key, var.default_monthly_budget)
-  time_grain      = "Monthly"
+  # The shared subscription hosts the management function, so its one budget
+  # deliberately uses the management override. No role is selected implicitly
+  # from map ordering.
+  amount = var.allow_shared_subscription_ids ? (
+    lookup(var.monthly_budget_overrides, "management", var.default_monthly_budget)
+    ) : (
+    lookup(var.monthly_budget_overrides, each.key, var.default_monthly_budget)
+  )
+  time_grain = "Monthly"
 
   time_period {
     start_date = var.budget_start_date

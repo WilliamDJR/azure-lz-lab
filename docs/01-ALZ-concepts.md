@@ -2,7 +2,7 @@
 
 [中文版](01-ALZ-concepts_cn.md)
 
-> Goal: understand the Azure Landing Zone (ALZ) model, relate it to familiar GCP concepts, and connect the design decisions to `terraform/10-governance/`.
+This chapter explains the Azure Landing Zone (ALZ) model, maps relevant GCP concepts, and connects the design decisions to `terraform/10-governance/`.
 
 ---
 
@@ -53,13 +53,13 @@ Tenant Root Group                         <- avoid broad policy here
 
 ### Five design decisions behind the hierarchy
 
-1. **Why use an intermediate root?** The Tenant Root Group is universal and cannot be removed. A Deny policy there can affect subscriptions the platform team does not own and is difficult to roll back. An intermediate root creates a lifecycle-managed ALZ boundary and allows parallel versions of the hierarchy.
-2. **Why separate Corp and Online?** They require different guardrails. Corp workloads have private connectivity to the enterprise and generally prohibit direct public IPs. Online workloads are designed for internet exposure. Policy requirements, not organizational charts, justify the split.
-3. **Why keep Sandbox outside Landing Zones?** Engineers need a safe place for experimentation. The trade is deliberately relaxed policy in exchange for no connectivity to the corporate network.
-4. **Why separate Platform into subscriptions?** Subscriptions are quota, billing, and access boundaries. Connectivity costs can be allocated centrally; identity and network changes have different blast radii; and monitoring should remain accessible when a workload subscription fails.
-5. **Why add Security?** Security operations often needs a different access boundary from platform operations. A dedicated subscription lets the SOC own Sentinel and related controls without receiving broad write access to Management or Connectivity.
+1. **Intermediate root:** The Tenant Root Group is universal and cannot be removed. A Deny policy there can affect subscriptions the platform team does not own and is difficult to roll back. An intermediate root creates a lifecycle-managed ALZ boundary and allows parallel versions of the hierarchy.
+2. **Corp and Online separation:** These branches require different guardrails. Corp workloads have private connectivity to the enterprise and generally prohibit direct public IPs. Online workloads are designed for internet exposure. Policy requirements, not organizational charts, justify the split.
+3. **Sandbox outside Landing Zones:** Engineers need a safe place for experimentation. The trade is deliberately relaxed policy in exchange for no connectivity to the corporate network.
+4. **Separate Platform subscriptions:** Subscriptions are quota, billing, and access boundaries. Connectivity costs can be allocated centrally; identity and network changes have different blast radii; and monitoring should remain accessible when a workload subscription fails.
+5. **Dedicated Security boundary:** Security operations often needs a different access boundary from platform operations. A dedicated subscription lets the SOC own Sentinel and related controls without receiving broad write access to Management or Connectivity.
 
-## What belongs in the Platform subscriptions?
+## Platform subscription resource placement
 
 ### Identity subscription is not Microsoft Entra ID
 
@@ -111,9 +111,9 @@ ALZ organizes by **ownership and blast radius**, not by resource type.
 
 Business VMs, AKS clusters, databases, and App Services therefore belong in Corp or Online subscriptions. Platform subscriptions primarily contain shared services used by workloads.
 
-### A practical placement test
+### Resource-placement criteria
 
-Ask three questions:
+Evaluate three criteria:
 
 1. Who is affected if the resource fails: one team or the organization?
 2. Who should pay for it: one product or a shared platform budget?
@@ -131,7 +131,7 @@ Examples:
 
 | # | Design area | Core question | This lab |
 |---|---|---|---|
-| 1 | **Azure billing and Entra tenant** | Tenant and billing hierarchy | One tenant, one MCA invoice section, nine role subscriptions; see [04-subscription-vending.md](04-subscription-vending.md) |
+| 1 | **Azure billing and Entra tenant** | Tenant and billing hierarchy | Multi-subscription route: one tenant, one MCA invoice section and nine role subscriptions. Single-subscription route: one existing subscription with logical roles. See [04-subscription-vending.md](04-subscription-vending.md) and [05-single-subscription.md](05-single-subscription.md) |
 | 2 | **Identity and access management** | Who can do what, and how is privilege controlled? | Role assignments and managed identities; PIM is conceptual |
 | 3 | **Resource organization** | How are management groups, subscriptions, resource groups, names, and tags structured? | `10-governance` |
 | 4 | **Network topology and connectivity** | Hub-Spoke or Virtual WAN, egress, and hybrid connectivity | `20-platform`; see [02-networking.md](02-networking.md) |
@@ -179,7 +179,7 @@ The word *accelerator* can refer to different things:
 
 Clarify which accelerator is being discussed. The portal experience, reusable IaC modules, and bootstrap tooling solve different problems.
 
-After the manual governance, networking and delivery labs, follow [05-alz-accelerator.md](05-alz-accelerator.md) to generate and review the official Terraform path.
+After the manual governance, networking and delivery labs, follow [06-alz-accelerator.md](06-alz-accelerator.md) to generate and review the official Terraform path.
 
 ### Azure ALZ is not identical to Argo CD GitOps
 
@@ -219,10 +219,10 @@ Operate the landing zone as a product with an owner, backlog, versions, release 
 
 ## Hands-on checklist
 
-- [ ] Apply `terraform/10-governance/` and inspect the hierarchy in the portal.
-- [ ] Set `move_subscriptions_into_hierarchy = true` and verify all role subscriptions are placed correctly.
+- [ ] Apply `terraform/10-governance/` with the manifest for the selected route and inspect the hierarchy while `move_subscriptions_into_hierarchy = false`.
+- [ ] Multi-subscription route: enable movement and verify all nine role subscriptions. Single-subscription route: optionally enable movement and verify that the one subscription has only the selected parent management group.
 - [ ] Inspect Policy compliance after the initial evaluation completes.
-- [ ] Change `public_ip_policy_effect` from `Audit` to `Deny`, attempt a public-IP VM deployment, and identify the assignment ID in the error.
+- [ ] After reviewing existing workloads and placing the test subscription under Corp, change `public_ip_policy_effect` from `Audit` to `Deny`, attempt a disposable public-IP VM deployment, and identify the assignment ID in the error.
 - [ ] Create a time-bound policy exemption and observe its compliance state.
 - [ ] Set `log_analytics_workspace_id`, inspect the DINE assignment identity and role assignment, and start a remediation task.
 

@@ -133,6 +133,7 @@ stages:
                 terraform show -no-color tfplan > tfplan.txt
             env:
               TF_VAR_subscription_ids: $(SUBSCRIPTION_IDS_JSON)
+              TF_VAR_allow_shared_subscription_ids: $(ALLOW_SHARED_SUBSCRIPTION_IDS)
 
           - publish: ${{ parameters.workingDirectory }}/tfplan
             artifact: tfplan
@@ -202,3 +203,4 @@ stages:
                         "$(Pipeline.Workspace)/tfplan/tfplan"
                   env:
                     TF_VAR_subscription_ids: $(SUBSCRIPTION_IDS_JSON)
+                    TF_VAR_allow_shared_subscription_ids: $(ALLOW_SHARED_SUBSCRIPTION_IDS)

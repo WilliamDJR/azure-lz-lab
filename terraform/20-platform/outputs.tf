@@ -9,8 +9,24 @@ output "security_log_analytics_workspace_id" {
 }
 
 output "subscription_ids" {
-  description = "Subscription role map used for this deployment."
+  description = "Reference role-to-subscription map used by the provider aliases. Repeated values represent logical roles, not isolation."
   value       = var.subscription_ids
+}
+
+output "deployment_mode" {
+  description = "Whether provider aliases target one shared subscription or separate enterprise role subscriptions."
+  value       = var.allow_shared_subscription_ids ? "single-subscription" : "multi-subscription"
+}
+
+output "logical_role_resource_groups" {
+  description = "Resource groups that represent logical roles. Security and sandbox are null until their optional exercises are enabled."
+  value = {
+    management   = azurerm_resource_group.management.name
+    connectivity = azurerm_resource_group.connectivity.name
+    corp_dev     = azurerm_resource_group.landing_zone.name
+    security     = try(azurerm_resource_group.security[0].name, null)
+    sandbox      = try(azurerm_resource_group.onprem[0].name, null)
+  }
 }
 
 output "corp_dev_subscription_id" {

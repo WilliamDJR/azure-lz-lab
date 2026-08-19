@@ -29,9 +29,30 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --prefix) PREFIX="$2"; shift 2 ;;
-    --role) ROLE="$2"; shift 2 ;;
-    --billing-scope) BILLING_SCOPE="$2"; shift 2 ;;
+    --prefix)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "--prefix requires a non-empty value" >&2
+        exit 2
+      fi
+      PREFIX="$2"
+      shift 2
+      ;;
+    --role)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "--role requires a role name or all" >&2
+        exit 2
+      fi
+      ROLE="$2"
+      shift 2
+      ;;
+    --billing-scope)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "--billing-scope requires a complete MCA invoice-section scope" >&2
+        exit 2
+      fi
+      BILLING_SCOPE="$2"
+      shift 2
+      ;;
     --execute) EXECUTE=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;

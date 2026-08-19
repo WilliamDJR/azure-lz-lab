@@ -4,6 +4,8 @@
 
 This lab separates Azure billing placement from ALZ governance placement. They are related, but neither hierarchy automatically configures the other.
 
+This chapter retains the enterprise multi-subscription route. If subscription creation returns `PurchaseNeedsReview`, do not substitute repeated IDs into the vending commands or keep retrying. Continue with the separate [single-subscription capability lab](05-single-subscription.md), then return here only if Azure later approves additional subscriptions.
+
 ## Two independent hierarchies
 
 ```text
@@ -21,6 +23,7 @@ Billing account                             Tenant Root Group
 - The **Management Group** determines inherited Azure Policy and RBAC.
 - Creating a subscription under the correct invoice section does not place it in the ALZ hierarchy.
 - Moving a subscription between management groups does not change its billing profile.
+- Management groups contain child management groups and subscriptions. Resource groups remain inside a subscription and cannot be placed directly under different management-group branches.
 
 ## Subscription model used by the lab
 
@@ -82,8 +85,8 @@ A valid MCA Billing Profile and Invoice Section do not guarantee that the signed
 
 Until Azure permits another subscription, use one of these lab tracks:
 
-1. **Single-subscription learning track:** keep the existing sponsorship subscription, create the ALZ management-group hierarchy, and place platform/workload resource groups below it. This teaches policy, RBAC, networking, private endpoints, DNS, diagnostics, and Terraform delivery, but it is not an enterprise subscription-isolation boundary.
-2. **True multi-subscription track:** use an account/offer that is eligible to create additional subscriptions, or ask Microsoft to provision/clear the restriction. Only then create the management, connectivity, identity, security, and workload subscriptions and continue with the multi-subscription Terraform and Accelerator exercises.
+1. **Single-subscription learning track:** keep the existing sponsorship subscription, create the ALZ management-group hierarchy, optionally place the one subscription under a single reviewed branch, and separate logical platform/workload roles with resource groups and tags. Follow the complete [single-subscription capability lab](05-single-subscription.md). This is not an enterprise subscription-isolation boundary.
+2. **True multi-subscription track:** use an account/offer that is eligible to create additional subscriptions, or ask Microsoft to provision/clear the restriction. Only then create the management, connectivity, identity, security, and workload subscriptions and continue with the multi-subscription Terraform route. After cleaning the teaching deployment, continue with the [official Accelerator exercise](06-alz-accelerator.md).
 
 Do not repeatedly retry `--role all`; the helper now stops with an explicit explanation when Azure returns `PurchaseNeedsReview`.
 

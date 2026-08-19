@@ -4,6 +4,8 @@
 # Billing placement is configured when subscriptions are created. This file
 # maps existing subscription IDs to their ALZ governance and platform roles.
 
+allow_shared_subscription_ids = false
+
 subscription_ids = {
   management   = "00000000-0000-0000-0000-000000000001"
   connectivity = "00000000-0000-0000-0000-000000000002"

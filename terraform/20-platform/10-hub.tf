@@ -34,7 +34,7 @@ resource "azurerm_resource_group" "connectivity" {
 
   name     = "rg-${var.prefix}-connectivity-${var.location}"
   location = var.location
-  tags     = var.tags
+  tags     = local.role_tags.connectivity
 }
 
 resource "azurerm_virtual_network" "hub" {
@@ -44,7 +44,7 @@ resource "azurerm_virtual_network" "hub" {
   resource_group_name = azurerm_resource_group.connectivity.name
   location            = azurerm_resource_group.connectivity.location
   address_space       = [var.hub_address_space]
-  tags                = var.tags
+  tags                = local.role_tags.connectivity
 }
 
 resource "azurerm_subnet" "hub_firewall" {
