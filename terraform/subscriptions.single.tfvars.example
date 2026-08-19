@@ -1,0 +1,20 @@
+# Single-subscription learning track.
+# Copy this file to subscriptions.single.tfvars and replace every occurrence
+# of the placeholder with the existing Sponsorship subscription ID.
+#
+# This deliberately models the ALZ roles as logical boundaries only. It does
+# not provide enterprise subscription isolation, quotas, or separate billing.
+
+allow_shared_subscription_ids = true
+
+subscription_ids = {
+  management   = "00000000-0000-0000-0000-000000000001"
+  connectivity = "00000000-0000-0000-0000-000000000001"
+  identity     = "00000000-0000-0000-0000-000000000001"
+  security     = "00000000-0000-0000-0000-000000000001"
+  corp_dev     = "00000000-0000-0000-0000-000000000001"
+  corp_prod    = "00000000-0000-0000-0000-000000000001"
+  online_dev   = "00000000-0000-0000-0000-000000000001"
+  online_prod  = "00000000-0000-0000-0000-000000000001"
+  sandbox      = "00000000-0000-0000-0000-000000000001"
+}

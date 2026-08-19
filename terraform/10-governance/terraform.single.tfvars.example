@@ -1,0 +1,29 @@
+# Root-specific settings for the single-subscription track. Subscription IDs
+# are supplied through ../subscriptions.single.tfvars.
+
+prefix           = "alz1sub"
+root_display_name = "ALZ Single-Subscription Learning"
+
+allow_shared_subscription_ids = true
+allowed_locations             = ["australiaeast", "australiasoutheast", "global"]
+
+# First apply: create and inspect the hierarchy without moving the existing
+# subscription. Change to true only after inventorying all existing resources.
+move_subscriptions_into_hierarchy = false
+single_subscription_management_group_key = "corp"
+
+# Assignment exists in DoNotEnforce mode first. Enabling enforcement can
+# affect every current and future resource deployment in the subscription.
+enforce_allowed_locations_policy = false
+public_ip_policy_effect            = "Audit"
+
+# Optional after the platform workspace exists:
+# log_analytics_workspace_id = "/subscriptions/.../resourceGroups/.../providers/Microsoft.OperationalInsights/workspaces/..."
+
+# One subscription gets one budget in this mode.
+# budget_start_date      = "2026-08-01T00:00:00Z"
+# default_monthly_budget = 25
+# monthly_budget_overrides = {
+#   management = 25
+# }
+# budget_contact_emails = ["cloud-operations@example.com"]

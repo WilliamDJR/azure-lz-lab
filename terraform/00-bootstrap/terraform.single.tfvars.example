@@ -1,0 +1,11 @@
+# Single-subscription bootstrap. Copy this file to terraform.tfvars and replace
+# the placeholder with the existing subscription ID. The state account can
+# host both tracks because init-backends.sh uses separate state keys.
+
+management_subscription_id = "00000000-0000-0000-0000-000000000001"
+prefix                     = "alz1sub"
+location                   = "australiaeast"
+
+# Leave public access available to Microsoft Entra-authenticated callers for
+# the first deployment. Restrict it only after confirming the required CIDRs.
+allowed_ip_cidrs = []

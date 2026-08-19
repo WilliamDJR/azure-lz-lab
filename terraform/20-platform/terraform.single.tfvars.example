@@ -1,0 +1,25 @@
+# Single-subscription learning track. The provider aliases still describe the
+# enterprise roles, but all resources are created in one existing subscription
+# and separated by resource group, naming, and the alz-role tag.
+
+prefix   = "alz1sub"
+location = "australiaeast"
+
+allow_shared_subscription_ids = true
+
+# Cost-controlled first apply. The baseline still includes Storage, Private
+# Endpoint, Log Analytics, and (when true) a small VM; it is not free.
+enable_firewall         = false
+enable_vpn_gateway      = false
+enable_simulated_onprem = false
+enable_test_vm          = true
+enable_sentinel         = false
+
+log_retention_days = 30
+
+tags = {
+  lab             = "true"
+  owner           = "platform-team"
+  environment     = "learning"
+  deployment-mode = "single-subscription"
+}
