@@ -70,6 +70,98 @@ The all-role run reuses an existing alias and writes `terraform/subscriptions.tf
 
 If the subscriptions already exist, do not run the creation helper. Copy `terraform/subscriptions.tfvars.example` to `terraform/subscriptions.tfvars` and enter the IDs manually.
 
+## Verify the first subscription before continuing
+
+Do not treat the helper's summary as proof of success unless it contains a real subscription GUID. The `az account alias` command belongs to the Azure CLI `account` extension. The helper installs that extension before command substitution and rejects extension prompts or other text as IDs. The command reference documents the alias resource's `provisioningState` and `properties.subscriptionId` fields. [Azure CLI `az account alias`](https://learn.microsoft.com/cli/azure/account/alias?view=azure-cli-latest)
+
+With the default prefix, the canonical management alias is `alzlab-platform-management` (the display name). The helper also checks the older short alias `alzlab-management` for compatibility. For the example alias, first check the alias itself:
+
+```bash
+az extension show --name account --only-show-errors >/dev/null 2>&1 || \
+  az extension add --name account --only-show-errors
+
+ALIAS_NAME='alzlab-platform-management'
+SUBSCRIPTION_ID=$(az account alias show \
+  --name "$ALIAS_NAME" \
+  --query properties.subscriptionId \
+  --output tsv \
+  --only-show-errors)
+
+if [[ ! "$SUBSCRIPTION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+  echo "No valid subscription ID was returned. Do not continue." >&2
+  exit 1
+fi
+
+az account alias show \
+  --name "$ALIAS_NAME" \
+  --query '{alias:name,state:properties.provisioningState,subscriptionId:properties.subscriptionId,displayName:properties.displayName,billingScope:properties.billingScope}' \
+  --output json
+
+az account list --refresh \
+  --query "[?id=='$SUBSCRIPTION_ID'].{name:name,id:id,state:state,tenantId:tenantId}" \
+  --output table
+
+az account show --subscription "$SUBSCRIPTION_ID" \
+  --query '{name:name,id:id,tenantId:tenantId,state:state}' \
+  --output table
+```
+
+The alias state must be `Succeeded`, and Azure CLI must return the same GUID for `id`. If your output only contains text such as `The command requires the extension account`, no subscription ID was returned; the previous helper run must be treated as inconclusive, not as a successful reuse or creation.
+
+### Verify the Billing Profile and Invoice Section
+
+Parse the three identifiers from the exact `AZURE_BILLING_SCOPE` used for creation. Do not substitute a billing account, profile or invoice section from a different scope:
+
+```bash
+BILLING_SCOPE="${AZURE_BILLING_SCOPE:?Set AZURE_BILLING_SCOPE first}"
+BILLING_ACCOUNT_ID="${BILLING_SCOPE#*/billingAccounts/}"
+BILLING_ACCOUNT_ID="${BILLING_ACCOUNT_ID%%/billingProfiles/*}"
+BILLING_PROFILE_ID="${BILLING_SCOPE#*/billingProfiles/}"
+BILLING_PROFILE_ID="${BILLING_PROFILE_ID%%/invoiceSections/*}"
+INVOICE_SECTION_ID="${BILLING_SCOPE##*/invoiceSections/}"
+
+printf 'Billing account:  %s\nBilling profile:  %s\nInvoice section:  %s\n' \
+  "$BILLING_ACCOUNT_ID" "$BILLING_PROFILE_ID" "$INVOICE_SECTION_ID"
+
+az billing account show \
+  --name "$BILLING_ACCOUNT_ID" \
+  --expand 'soldTo,billingProfiles,billingProfiles/invoiceSections' \
+  --output json
+
+az billing profile show \
+  --account-name "$BILLING_ACCOUNT_ID" \
+  --name "$BILLING_PROFILE_ID" \
+  --expand invoiceSections \
+  --output json
+
+az billing account invoice-section show \
+  --billing-account-name "$BILLING_ACCOUNT_ID" \
+  --invoice-section-name "$INVOICE_SECTION_ID" \
+  --expand billingProfiles \
+  --output json
+
+az billing subscription list \
+  --account-name "$BILLING_ACCOUNT_ID" \
+  --profile-name "$BILLING_PROFILE_ID" \
+  --invoice-section-name "$INVOICE_SECTION_ID" \
+  --output json
+```
+
+The last command must include the new `SUBSCRIPTION_ID`. Azure's billing CLI groups are currently preview APIs, so also confirm the same relationship in **Cost Management + Billing → Billing scopes → Invoice sections → Subscriptions**. Usage and sponsorship-credit attribution can take time to appear; after deploying a small test resource, verify the charge in Cost Management before vending the remaining subscriptions. The billing commands above are read-only. [Azure billing subscription CLI](https://learn.microsoft.com/cli/azure/billing/subscription?view=azure-cli-latest)
+
+### Verify ALZ management-group placement later
+
+Billing placement does not place a subscription in the ALZ hierarchy. After the governance Terraform root has created the hierarchy and `move_subscriptions_into_hierarchy` is intentionally enabled, verify the management-group relationship separately:
+
+```bash
+az account management-group subscription show \
+  --name '<alz-intermediate-root-or-target-management-group-id>' \
+  --subscription "$SUBSCRIPTION_ID" \
+  --output json
+```
+
+Do not enable subscription movement until the plan shows the intended target management group.
+
 ## Enterprise vending workflow
 
 The local script demonstrates the bootstrap mechanism. A mature platform exposes subscription vending as a reviewed product workflow:
@@ -101,4 +193,3 @@ Use workload identity federation for the automation identity, apply least privil
 - [Programmatically create MCA subscriptions](https://learn.microsoft.com/azure/cost-management-billing/manage/programmatically-create-subscription-microsoft-customer-agreement)
 - [Subscription vending guidance](https://learn.microsoft.com/azure/cloud-adoption-framework/ready/landing-zone/design-area/subscription-vending)
 - [Management-group and subscription organization](https://learn.microsoft.com/azure/cloud-adoption-framework/ready/landing-zone/design-area/resource-org-management-groups)
-

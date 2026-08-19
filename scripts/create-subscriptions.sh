@@ -11,6 +11,7 @@ PREFIX="alzlab"
 ROLE="all"
 EXECUTE=false
 BILLING_SCOPE="${AZURE_BILLING_SCOPE:-}"
+SUBSCRIPTION_ID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 
 usage() {
   cat <<'EOF'
@@ -61,12 +62,24 @@ display_name() {
   esac
 }
 
+extract_subscription_id() {
+  local output="$1"
+  local line
+  while IFS= read -r line; do
+    if [[ "$line" =~ $SUBSCRIPTION_ID_RE ]]; then
+      printf '%s\n' "$line"
+      return 0
+    fi
+  done <<<"$output"
+  return 1
+}
+
 if [[ "$EXECUTE" != true ]]; then
   echo "DRY RUN: no subscription will be created."
   echo "Use --execute only after confirming the Billing Profile and Invoice Section."
   echo
   for role in "${selected_roles[@]}"; do
-    echo "$role -> $(display_name "$role") (alias: $PREFIX-${role//_/-})"
+    echo "$role -> $(display_name "$role") (alias: $(display_name "$role"))"
   done
   exit 0
 fi
@@ -81,28 +94,57 @@ if [[ ! "$BILLING_SCOPE" =~ ^/providers/Microsoft\.Billing/billingAccounts/.+/bi
   exit 2
 fi
 
-az account show >/dev/null
+if ! az extension show --name account --only-show-errors >/dev/null 2>&1; then
+  echo "Installing the Azure CLI account extension required by az account alias..."
+  az extension add --name account --only-show-errors
+fi
+
+az account show --only-show-errors >/dev/null
 
 declare -A subscription_ids
 for role in "${selected_roles[@]}"; do
-  alias_name="$PREFIX-${role//_/-}"
   name=$(display_name "$role")
+  # The display name is the canonical alias. The short form is checked as a
+  # compatibility fallback for subscriptions created by an earlier helper.
+  alias_name="$name"
+  legacy_alias_name="$PREFIX-${role//_/-}"
 
-  existing_id=$(az account alias show --name "$alias_name" --query properties.subscriptionId -o tsv 2>/dev/null || true)
-  if [[ -n "$existing_id" ]]; then
-    echo "Reusing $name: $existing_id"
-    subscription_ids[$role]="$existing_id"
+  for candidate_alias in "$alias_name" "$legacy_alias_name"; do
+    existing_output=$(az account alias show \
+      --name "$candidate_alias" \
+      --query properties.subscriptionId \
+      -o tsv \
+      --only-show-errors 2>/dev/null || true)
+    if existing_id=$(extract_subscription_id "$existing_output"); then
+      echo "Reusing $name ($candidate_alias): $existing_id"
+      subscription_ids[$role]="$existing_id"
+      break
+    fi
+  done
+  if [[ -n "${subscription_ids[$role]:-}" ]]; then
     continue
   fi
 
   echo "Creating $name under the supplied Billing Profile and Invoice Section..."
-  subscription_ids[$role]=$(az account alias create \
+  create_output=$(az account alias create \
     --name "$alias_name" \
     --display-name "$name" \
     --billing-scope "$BILLING_SCOPE" \
     --workload Production \
     --query properties.subscriptionId \
-    -o tsv)
+    -o tsv \
+    --only-show-errors 2>&1) || {
+      echo "$create_output" >&2
+      exit 1
+    }
+
+  if ! created_id=$(extract_subscription_id "$create_output"); then
+    echo "The alias command did not return a subscription GUID for $name." >&2
+    echo "Raw command output:" >&2
+    echo "$create_output" >&2
+    exit 1
+  fi
+  subscription_ids[$role]="$created_id"
 done
 
 echo

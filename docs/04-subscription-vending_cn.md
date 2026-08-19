@@ -70,6 +70,98 @@ export AZURE_BILLING_SCOPE='/providers/Microsoft.Billing/billingAccounts/<accoun
 
 如果订阅已经存在，不要运行创建脚本。把 `terraform/subscriptions.tfvars.example` 复制为 `terraform/subscriptions.tfvars`，然后手工填写 ID。
 
+## 继续创建其他订阅前先验证
+
+只有当辅助脚本输出真实的订阅 GUID 时，才能把摘要视为成功。`az account alias` 属于 Azure CLI 的 `account` 扩展；辅助脚本现在会在命令替换前安装该扩展，并拒绝把扩展提示或其他文本当成订阅 ID。官方命令参考中，alias 资源的 `provisioningState` 和 `properties.subscriptionId` 是关键字段。[Azure CLI `az account alias`](https://learn.microsoft.com/cli/azure/account/alias?view=azure-cli-latest)
+
+默认前缀下，management 的规范 alias 是显示名称 `alzlab-platform-management`。辅助脚本还会兼容检查旧的短 alias `alzlab-management`。以示例 alias 为例，先验证 alias 本身：
+
+```bash
+az extension show --name account --only-show-errors >/dev/null 2>&1 || \
+  az extension add --name account --only-show-errors
+
+ALIAS_NAME='alzlab-platform-management'
+SUBSCRIPTION_ID=$(az account alias show \
+  --name "$ALIAS_NAME" \
+  --query properties.subscriptionId \
+  --output tsv \
+  --only-show-errors)
+
+if [[ ! "$SUBSCRIPTION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+  echo "没有返回有效的订阅 ID，不要继续。" >&2
+  exit 1
+fi
+
+az account alias show \
+  --name "$ALIAS_NAME" \
+  --query '{alias:name,state:properties.provisioningState,subscriptionId:properties.subscriptionId,displayName:properties.displayName,billingScope:properties.billingScope}' \
+  --output json
+
+az account list --refresh \
+  --query "[?id=='$SUBSCRIPTION_ID'].{name:name,id:id,state:state,tenantId:tenantId}" \
+  --output table
+
+az account show --subscription "$SUBSCRIPTION_ID" \
+  --query '{name:name,id:id,tenantId:tenantId,state:state}' \
+  --output table
+```
+
+Alias 状态必须是 `Succeeded`，Azure CLI 返回的 `id` 也必须是同一个 GUID。如果输出只有 `The command requires the extension account` 之类的提示，就没有返回订阅 ID；上一次脚本运行必须视为结果不确定，不能当成成功复用或成功创建。
+
+### 验证 Billing Profile 和 Invoice Section
+
+从创建订阅时使用的完整 `AZURE_BILLING_SCOPE` 中解析三个 ID。不要替换成其他 Billing Account、Profile 或 Invoice Section：
+
+```bash
+BILLING_SCOPE="${AZURE_BILLING_SCOPE:?请先设置 AZURE_BILLING_SCOPE}"
+BILLING_ACCOUNT_ID="${BILLING_SCOPE#*/billingAccounts/}"
+BILLING_ACCOUNT_ID="${BILLING_ACCOUNT_ID%%/billingProfiles/*}"
+BILLING_PROFILE_ID="${BILLING_SCOPE#*/billingProfiles/}"
+BILLING_PROFILE_ID="${BILLING_PROFILE_ID%%/invoiceSections/*}"
+INVOICE_SECTION_ID="${BILLING_SCOPE##*/invoiceSections/}"
+
+printf 'Billing account:  %s\nBilling profile:  %s\nInvoice section:  %s\n' \
+  "$BILLING_ACCOUNT_ID" "$BILLING_PROFILE_ID" "$INVOICE_SECTION_ID"
+
+az billing account show \
+  --name "$BILLING_ACCOUNT_ID" \
+  --expand 'soldTo,billingProfiles,billingProfiles/invoiceSections' \
+  --output json
+
+az billing profile show \
+  --account-name "$BILLING_ACCOUNT_ID" \
+  --name "$BILLING_PROFILE_ID" \
+  --expand invoiceSections \
+  --output json
+
+az billing account invoice-section show \
+  --billing-account-name "$BILLING_ACCOUNT_ID" \
+  --invoice-section-name "$INVOICE_SECTION_ID" \
+  --expand billingProfiles \
+  --output json
+
+az billing subscription list \
+  --account-name "$BILLING_ACCOUNT_ID" \
+  --profile-name "$BILLING_PROFILE_ID" \
+  --invoice-section-name "$INVOICE_SECTION_ID" \
+  --output json
+```
+
+最后一条命令的结果中必须出现新的 `SUBSCRIPTION_ID`。Azure Billing CLI 命令组目前是预览 API，因此还应在 Portal 的 **Cost Management + Billing → Billing scopes → Invoice sections → Subscriptions** 中确认相同关系。使用量和 Sponsorship Credit 归属可能需要时间才显示；部署一个很小的测试资源后，先在 Cost Management 中确认费用归属，再创建其他订阅。以上 Billing 命令都是只读操作。[Azure billing subscription CLI](https://learn.microsoft.com/cli/azure/billing/subscription?view=azure-cli-latest)
+
+### 后续验证 ALZ 管理组归位
+
+Billing 归属不会自动把订阅放入 ALZ 管理组。治理 Terraform Root 创建层级并且明确启用 `move_subscriptions_into_hierarchy` 后，单独验证管理组关系：
+
+```bash
+az account management-group subscription show \
+  --name '<alz-intermediate-root-or-target-management-group-id>' \
+  --subscription "$SUBSCRIPTION_ID" \
+  --output json
+```
+
+在 plan 显示目标管理组正确之前，不要启用订阅移动。
+
 ## 企业级 Subscription Vending 流程
 
 本地脚本用于演示引导机制。成熟的平台应把订阅交付做成经过审查的产品流程：
@@ -101,4 +193,3 @@ export AZURE_BILLING_SCOPE='/providers/Microsoft.Billing/billingAccounts/<accoun
 - [以编程方式创建 MCA 订阅](https://learn.microsoft.com/azure/cost-management-billing/manage/programmatically-create-subscription-microsoft-customer-agreement)
 - [Subscription vending 指南](https://learn.microsoft.com/azure/cloud-adoption-framework/ready/landing-zone/design-area/subscription-vending)
 - [管理组与订阅组织](https://learn.microsoft.com/azure/cloud-adoption-framework/ready/landing-zone/design-area/resource-org-management-groups)
-
