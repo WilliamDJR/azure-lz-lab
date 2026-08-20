@@ -134,6 +134,7 @@ stages:
             env:
               TF_VAR_subscription_ids: $(SUBSCRIPTION_IDS_JSON)
               TF_VAR_allow_shared_subscription_ids: $(ALLOW_SHARED_SUBSCRIPTION_IDS)
+              TF_VAR_allow_logical_workload_subscription_ids: $(ALLOW_LOGICAL_WORKLOAD_SUBSCRIPTION_IDS)
 
           - publish: ${{ parameters.workingDirectory }}/tfplan
             artifact: tfplan
@@ -204,3 +205,4 @@ stages:
                   env:
                     TF_VAR_subscription_ids: $(SUBSCRIPTION_IDS_JSON)
                     TF_VAR_allow_shared_subscription_ids: $(ALLOW_SHARED_SUBSCRIPTION_IDS)
+                    TF_VAR_allow_logical_workload_subscription_ids: $(ALLOW_LOGICAL_WORKLOAD_SUBSCRIPTION_IDS)

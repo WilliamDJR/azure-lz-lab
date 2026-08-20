@@ -13,12 +13,17 @@ SUBSCRIPTION_VAR_FILE=${SUBSCRIPTION_VAR_FILE:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/nuke-everything.sh [--mode multi|single] [--var-file PATH]
+Usage: ./scripts/nuke-everything.sh [--mode multi|single|quota-limited] [--var-file PATH]
 
 The mode selects the matching remote-state keys before destroy. The default
-manifests are terraform/subscriptions.tfvars for multi and
-terraform/subscriptions.single.tfvars for single. SUBSCRIPTION_VAR_FILE or
---var-file can override the manifest path.
+manifests are terraform/subscriptions.tfvars for multi,
+terraform/subscriptions.single.tfvars for single and
+terraform/subscriptions.quota-limited.tfvars for quota-limited.
+SUBSCRIPTION_VAR_FILE or --var-file can override the manifest path.
+
+This script never deletes subscriptions. In quota-limited mode it removes only
+resources recorded in the manual Terraform states; it must not be used to
+clean up an official Accelerator deployment.
 EOF
 }
 
@@ -26,7 +31,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
-        echo "--mode requires multi or single" >&2
+        echo "--mode requires multi, single or quota-limited" >&2
         exit 2
       fi
       MODE="$2"
@@ -59,8 +64,11 @@ case "$MODE" in
   single)
     default_var_file="$ROOT/terraform/subscriptions.single.tfvars"
     ;;
+  quota-limited)
+    default_var_file="$ROOT/terraform/subscriptions.quota-limited.tfvars"
+    ;;
   *)
-    echo "--mode must be multi or single" >&2
+    echo "--mode must be multi, single or quota-limited" >&2
     exit 2
     ;;
 esac
@@ -75,19 +83,41 @@ SUBSCRIPTION_VAR_FILE="$manifest_directory/$(basename "$SUBSCRIPTION_VAR_FILE")"
 
 echo "Mode             : $MODE"
 echo "Subscription file: $SUBSCRIPTION_VAR_FILE"
-read -rp "This destroys the ENTIRE lab for this mode. Type 'destroy' to continue: " confirm
-[[ "$confirm" == "destroy" ]] || { echo "Aborted."; exit 1; }
+echo "This removes only resources recorded in the manual Terraform states."
+echo "It does not delete subscriptions, billing records, or resources outside those states."
+if [[ "$MODE" == "quota-limited" ]]; then
+  echo "The workload subscription may contain organizational resources; review both destroy plans carefully."
+fi
+read -rp "Type 'destroy-lab-resources' to continue: " confirm
+[[ "$confirm" == "destroy-lab-resources" ]] || { echo "Aborted."; exit 1; }
 
 "$ROOT/scripts/init-backends.sh" --mode "$MODE"
 
-echo "==> 20-platform"
-(cd "$ROOT/terraform/20-platform" && $TF destroy -auto-approve -var-file="$SUBSCRIPTION_VAR_FILE")
+plan_and_apply_destroy() {
+  local directory=$1
+  local label=$2
+  local plan_file
+  plan_file=$(mktemp "${TMPDIR:-/tmp}/alz-${MODE}-${label}.XXXXXX")
+  trap 'rm -f "$plan_file"' RETURN
 
-echo "==> 10-governance"
-# Terraform removes the association it manages before deleting its management
-# groups. Azure does not promise to restore a subscription's previous parent;
-# verify the resulting parent after destroy.
-(cd "$ROOT/terraform/10-governance" && $TF destroy -auto-approve -var-file="$SUBSCRIPTION_VAR_FILE")
+  echo "==> $label destroy plan"
+  (cd "$directory" && $TF plan -destroy -var-file="$SUBSCRIPTION_VAR_FILE" -out="$plan_file")
+  (cd "$directory" && $TF show "$plan_file")
+  read -rp "Review complete. Type 'apply-destroy' to apply this $label plan: " apply_confirm
+  [[ "$apply_confirm" == "apply-destroy" ]] || { echo "Aborted before $label changes."; exit 1; }
+  (cd "$directory" && $TF apply "$plan_file")
+  rm -f "$plan_file"
+  trap - RETURN
+}
+
+# Platform must go first. The plan review is intentional: in quota-limited
+# mode the existing workload subscription may contain organization resources.
+plan_and_apply_destroy "$ROOT/terraform/20-platform" "20-platform"
+
+# Terraform removes only the governance resources recorded in this state,
+# including its association and management-group Policies. Azure does not
+# promise to restore a subscription's previous parent; verify it afterwards.
+plan_and_apply_destroy "$ROOT/terraform/10-governance" "10-governance"
 
 echo
 echo "Management groups can take a few minutes to disappear from the portal."

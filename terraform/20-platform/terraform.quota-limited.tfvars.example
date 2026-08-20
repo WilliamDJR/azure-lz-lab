@@ -1,0 +1,26 @@
+# Root-specific settings for the quota-limited profile.
+# Subscription IDs are supplied through ../subscriptions.quota-limited.tfvars.
+
+prefix   = "alzquota"
+location = "australiaeast"
+
+allow_shared_subscription_ids           = false
+allow_logical_workload_subscription_ids = true
+
+# Cost-controlled baseline. The existing Sponsorship subscription contains
+# organizational resources; every resource group uses the alz-role/lab tags,
+# and the owner must review the plan before any apply.
+enable_firewall         = false
+enable_vpn_gateway      = false
+enable_simulated_onprem = false
+enable_test_vm          = true
+enable_sentinel         = false
+
+log_retention_days = 30
+
+tags = {
+  lab             = "true"
+  owner           = "platform-team"
+  environment     = "learning"
+  deployment-mode = "quota-limited"
+}

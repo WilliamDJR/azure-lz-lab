@@ -35,7 +35,14 @@ output "subscription_placement" {
 
 output "deployment_mode" {
   description = "Whether this root is modelling one shared subscription or separate enterprise role subscriptions."
-  value       = var.allow_shared_subscription_ids ? "single-subscription" : "multi-subscription"
+  value = var.allow_shared_subscription_ids ? "single-subscription" : (
+    var.allow_logical_workload_subscription_ids ? "quota-limited" : "multi-subscription"
+  )
+}
+
+output "logical_role_subscription_ids" {
+  description = "Logical role-to-subscription map. In quota-limited mode the workload roles intentionally reuse the protected existing subscription."
+  value       = var.subscription_ids
 }
 
 output "actual_subscription_placement" {

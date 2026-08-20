@@ -18,6 +18,14 @@ The helper scripts in `accelerator/` are optional guards around official command
 
 The manual Terraform roots remain the source of truth for the one-subscription capability lab. Once a supported two- or four-subscription Accelerator deployment is adopted, its generated repository, pipeline and state become the source of truth. Never let the manual roots and the Accelerator manage the same hierarchy or resources.
 
+For this account, the practical four-subscription gate means the four newly
+created Active subscriptions are the Accelerator platform subscriptions. The
+existing Sponsorship subscription contains organization-owned resources and is
+the protected workload/experiment subscription. It is not an Accelerator
+platform input, must not be deleted, and must not be included in the official
+cleanup command. The repository's quota-limited manual profile can reuse it for
+logical workload roles, but it does not create workload isolation.
+
 Official boundary references: [Accelerator planning](https://azure.github.io/Azure-Landing-Zones/accelerator/0_planning/), [platform subscriptions and permissions](https://azure.github.io/Azure-Landing-Zones/accelerator/1_prerequisites/platform-subscriptions/), and [management-group subscription moves](https://learn.microsoft.com/en-us/azure/governance/management-groups/manage).
 
 ## 2. Transition gate before any supported Accelerator apply
@@ -25,15 +33,21 @@ Official boundary references: [Accelerator planning](https://azure.github.io/Azu
 The one-subscription review-only exercise in section 4 creates local files only and does not require this transition. Before a two- or four-subscription bootstrap/apply:
 
 1. Finish the manual governance, networking, DNS, Policy and cost exercises, and save the evidence you need.
-2. Follow the cleanup section of the active manual route. For the single-subscription route, use [its cleanup and migration procedure](05-single-subscription.md#10-cleanup-and-later-migration). For the multi-subscription teaching route, run:
+2. Follow the cleanup section of the active manual route. For the single-subscription route, use [its cleanup and migration procedure](05-single-subscription.md#10-cleanup-and-later-migration). For the quota-limited teaching route, run the reviewed resource-only cleanup:
 
    ```bash
-   ./scripts/nuke-everything.sh --mode multi
+   ./scripts/nuke-everything.sh --mode quota-limited
    ```
 
-3. Verify that teaching resources, management-group associations, Policy assignments and role assignments are gone. The script deliberately retains bootstrap state storage.
+   The script removes only manual Terraform state resources after showing a
+   destroy plan. It never deletes a subscription. Stop if any plan includes an
+   organization-owned resource or resource group. For the historical nine-role
+   teaching route, use `--mode multi` only when all nine IDs are genuinely
+   available and the target subscriptions are approved for teardown.
+
+3. Verify that teaching resources, management-group associations, Policy assignments and role assignments are gone. The script deliberately retains bootstrap state storage and the protected workload subscription.
 4. Archive the manual state and plan evidence. Do not reuse its backend for the Accelerator and do not run those manual roots after cutover.
-5. Verify that each target subscription is active, belongs to the intended tenant and is empty enough for the reviewed design. A two-subscription route needs distinct Management and Connectivity IDs; the guarded route needs four distinct IDs.
+5. Verify that each of the four platform subscriptions is active, belongs to the intended tenant and is empty enough for the reviewed design. Leave the protected workload subscription outside the Accelerator transition. A two-subscription route needs distinct Management and Connectivity IDs; the guarded route needs four distinct IDs.
 6. Start from a new, empty Accelerator target folder. Do not import the same resources into both states.
 
 ## 3. Prerequisites
@@ -243,7 +257,7 @@ Remove-PlatformLandingZone `
   -PlanMode
 ```
 
-For the guarded four-subscription route:
+For the guarded four-subscription route, pass only the four new platform subscriptions:
 
 ```powershell
 Remove-PlatformLandingZone `
@@ -253,7 +267,7 @@ Remove-PlatformLandingZone `
   -PlanMode
 ```
 
-Use `-AdditionalSubscriptions "<bootstrap-subscription-id>"` only when bootstrap used a separate fifth subscription. Review subscription targets, moves and every proposed deletion, then rerun without `-PlanMode` only when the preview is correct.
+Use `-AdditionalSubscriptions "<bootstrap-subscription-id>"` only when bootstrap used a separate fifth platform/bootstrap subscription. Never pass the protected existing workload subscription. Review subscription targets, moves and every proposed deletion, then rerun without `-PlanMode` only when the preview is correct.
 
 Second, remove bootstrap/version-control resources using the exact saved configuration and output directory from that deployment:
 

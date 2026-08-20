@@ -15,7 +15,14 @@ output "subscription_ids" {
 
 output "deployment_mode" {
   description = "Whether provider aliases target one shared subscription or separate enterprise role subscriptions."
-  value       = var.allow_shared_subscription_ids ? "single-subscription" : "multi-subscription"
+  value = var.allow_shared_subscription_ids ? "single-subscription" : (
+    var.allow_logical_workload_subscription_ids ? "quota-limited" : "multi-subscription"
+  )
+}
+
+output "logical_role_subscription_ids" {
+  description = "Logical role-to-subscription map. In quota-limited mode the workload roles intentionally reuse the protected existing subscription."
+  value       = var.subscription_ids
 }
 
 output "logical_role_resource_groups" {

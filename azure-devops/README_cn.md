@@ -28,11 +28,16 @@ open https://dev.azure.com          # 用 Microsoft 账号，免费
 #    命名 platform-common，加入：
 #      TF_VERSION、TF_BACKEND_RESOURCE_GROUP、TF_BACKEND_STORAGE_ACCOUNT、
 #      TF_BACKEND_CONTAINER、TF_BACKEND_KEY、SUBSCRIPTION_IDS_JSON、
-#      ALLOW_SHARED_SUBSCRIPTION_IDS
+#      ALLOW_SHARED_SUBSCRIPTION_IDS、
+#      ALLOW_LOGICAL_WORKLOAD_SUBSCRIPTION_IDS
 #    SUBSCRIPTION_IDS_JSON 是与 terraform/subscriptions.tfvars 对应的 JSON 对象
 #    多订阅模式使用 false；只有文档中的单订阅路线才使用 true
+#    只有配额受限路线（四个不同平台 ID + 一个受保护现有工作负载 ID）才把
+#    ALLOW_LOGICAL_WORKLOAD_SUBSCRIPTION_IDS 设为 true；其他情况保持 false
 #    单订阅模式按 Root 使用 10-governance-single.tfstate 或
 #    20-platform-single.tfstate
+#    配额受限模式按 Root 使用 10-governance-quota-limited.tfstate 或
+#    20-platform-quota-limited.tfstate
 
 # 4. Pipelines → Environments → New environment
 #    命名 alz-lab → Approvals and checks → Approvals → 把自己加为审批人

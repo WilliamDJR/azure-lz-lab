@@ -12,9 +12,16 @@ Important billing constraint: an Azure Sponsorship credit balance and permission
 |---|---|---|
 | One existing subscription | [Single-subscription capability lab](docs/05-single-subscription.md) | Deploy the manual Terraform implementation with logical role resource groups; practise governance, Policy, networking, observability and delivery without claiming subscription isolation |
 | Two subscriptions | Official Accelerator SMB scenario with Management + Connectivity | Use the official wizard rather than this repository's four-subscription wrapper; plan Identity and Security subscriptions for later |
+| Existing Active subscription plus up to four new subscriptions | Quota-limited transition route below, then the [full Accelerator exercise](docs/06-alz-accelerator.md) | Reuse the existing subscription as a protected workload/experiment boundary and reserve the four new subscriptions for Management, Connectivity, Identity and Security |
 | Four dedicated platform subscriptions plus workload subscriptions | Multi-subscription route below, followed by the [full Accelerator exercise](docs/06-alz-accelerator.md) | Validate enterprise subscription placement, cross-subscription permissions and platform/workload boundaries. The manual topology below requires nine unique role IDs. |
 
 The official Accelerator currently recommends four platform subscriptions and documents two as the SMB minimum. One subscription is supported by this repository's manual capability lab, not as an official Accelerator deployment topology. [Official planning guidance](https://azure.github.io/Azure-Landing-Zones/accelerator/0_planning/)
+
+For this account, Microsoft Support confirmed that four historical Deleted
+records still count toward the subscription limit. Raising the limit to nine
+therefore leaves four creation slots; deleting a newly created subscription
+does not return a slot. The existing Active Sponsorship subscription is
+protected and must not be deleted or treated as disposable lab capacity.
 
 The multi-subscription target is intentionally smaller than a production ALZ, but its boundaries are realistic: billing and governance are separate, platform capabilities have dedicated subscriptions, development and production have separate workload subscriptions, Terraform state is remote, and every Azure CLI operation is subscription-aware.
 
@@ -80,6 +87,8 @@ terraform/
   subscriptions.tfvars.example   shared role-to-subscription manifest
   subscriptions.single.tfvars.example
                                   one-subscription role manifest
+  subscriptions.quota-limited.tfvars.example
+                                  four platform IDs + protected workload ID
   00-bootstrap/                   protected remote state storage
   10-governance/                  management groups, Policy, RBAC, budgets
   20-platform/                    resources deployed across role subscriptions
@@ -113,9 +122,58 @@ Checkpoints before deployment:
 - Explain why DINE needs both a managed identity and RBAC.
 - Identify which resources are billed continuously and how they will be removed.
 
+# Part 2Q: Quota-limited platform route
+
+When the account has four creation slots but the existing Sponsorship
+subscription contains organization resources, use the four new subscriptions
+for the platform roles and keep the existing subscription as the protected
+workload/experiment subscription. This is the maximum useful expansion without
+spending irreversible quota on disposable workload subscriptions.
+
+```bash
+cp terraform/subscriptions.quota-limited.tfvars.example terraform/subscriptions.quota-limited.tfvars
+cp terraform/00-bootstrap/terraform.quota-limited.tfvars.example terraform/00-bootstrap/terraform.tfvars
+cp terraform/10-governance/terraform.quota-limited.tfvars.example terraform/10-governance/terraform.tfvars
+cp terraform/20-platform/terraform.quota-limited.tfvars.example terraform/20-platform/terraform.tfvars
+./scripts/init-backends.sh --mode quota-limited
+```
+
+Replace the five placeholders only after confirming all four new subscriptions
+are Active and tied to the intended Billing Profile and Invoice Section. Keep
+`move_subscriptions_into_hierarchy = false` until the owner of the existing
+Sponsorship subscription approves inheritance of management-group Policy. Run
+both roots with `plan`, review the target subscriptions and resource groups,
+then apply the low-cost baseline. All lab resource groups are uniquely named
+and tagged `lab=true`; never select an organization resource group as a target.
+If that owner later approves inheritance, set
+`allow_protected_workload_policy_inheritance = true` in the Governance vars in
+the same reviewed change; otherwise Terraform refuses the move.
+
+This route has four distinct platform subscriptions plus one existing
+workload subscription. The workload roles are logical labels only, and the
+governance root creates at most one Corp parent association for the repeated
+workload ID. The four new platform subscriptions are the IDs to use for the
+official Accelerator; leave the protected workload subscription outside the
+Accelerator platform input and cleanup.
+
+At the end of a session, disable billed features first. For full manual cleanup,
+use the matching state and inspect the destroy plans:
+
+```bash
+./scripts/destroy-expensive.sh
+./scripts/nuke-everything.sh --mode quota-limited
+```
+
+The script deletes only resources recorded in the manual Terraform states. It
+never deletes subscriptions. Stop if a destroy plan includes an organization
+resource, diagnostic setting, lock or resource group.
+
 # Part 2: Multi-subscription deployment and validation
 
-The steps below require all nine role-subscription IDs to be unique. If only one subscription is available, follow [Part 05](docs/05-single-subscription.md) instead; it has its own manifest, backend keys, safety gates and validation sequence.
+The steps below are the nine-role reference route and require all nine
+role-subscription IDs to be unique. It is not the current quota-limited default.
+If only one subscription is available, follow [Part 05](docs/05-single-subscription.md);
+if four creation slots remain, follow Part 2Q above.
 
 ## 0. Prerequisites and safety
 

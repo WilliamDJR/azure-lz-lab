@@ -7,6 +7,9 @@ location        = "australiaeast"
 # Keep false for the enterprise multi-subscription topology. Set true only
 # when using subscriptions.single.tfvars for the documented fallback track.
 allow_shared_subscription_ids = false
+# Set true only with subscriptions.quota-limited.tfvars: four distinct
+# platform IDs plus one protected existing workload ID.
+allow_logical_workload_subscription_ids = false
 
 # ---------------------------------------------------------------------------
 # Cost toggles. Everything below bills by the hour while it exists.

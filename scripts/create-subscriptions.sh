@@ -1,29 +1,37 @@
 #!/usr/bin/env bash
 #
 # Safe subscription-vending helper for a Microsoft Customer Agreement (MCA).
-# It is a dry run unless --execute is supplied. Start with --role management,
-# verify that subscription's charges use the intended sponsorship credit, then
-# run --role all. Existing aliases are reused instead of recreated.
+# It is a dry run unless --execute is supplied. Existing aliases are reused
+# instead of recreated. The quota-limited account route should create only the
+# four platform roles; the nine-role route requires an explicit acknowledgement.
 #
 set -euo pipefail
 
 PREFIX="alzlab"
 ROLE="all"
 EXECUTE=false
+ALLOW_NINE_ROLE_RUN=false
 BILLING_SCOPE="${AZURE_BILLING_SCOPE:-}"
 SUBSCRIPTION_ID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/create-subscriptions.sh [--prefix alzlab] [--role management|all]
+  ./scripts/create-subscriptions.sh [--prefix alzlab] [--role management|platform|all]
                                     [--billing-scope <MCA scope>] [--execute]
+                                    [--allow-nine-role-run]
 
 The billing scope has this form:
   /providers/Microsoft.Billing/billingAccounts/<account>/billingProfiles/<profile>/invoiceSections/<section>
 
 Without --execute, the script only prints the subscriptions it would create.
 Never commit a real billing scope or generated subscriptions.tfvars file.
+
+--role platform selects management, connectivity, identity and security only.
+--role all is the historical nine-role topology and requires
+--allow-nine-role-run when --execute is used. Deleted subscriptions continue
+to count against the account limit, so do not use that option for a quota-
+limited account.
 EOF
 }
 
@@ -54,18 +62,28 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --execute) EXECUTE=true; shift ;;
+    --allow-nine-role-run) ALLOW_NINE_ROLE_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
 
 all_roles=(management connectivity identity security corp_dev corp_prod online_dev online_prod sandbox)
+platform_roles=(management connectivity identity security)
 if [[ "$ROLE" == "all" ]]; then
   selected_roles=("${all_roles[@]}")
+elif [[ "$ROLE" == "platform" ]]; then
+  selected_roles=("${platform_roles[@]}")
 elif [[ " ${all_roles[*]} " == *" $ROLE "* ]]; then
   selected_roles=("$ROLE")
 else
-  echo "--role must be one of: management, connectivity, identity, security, corp_dev, corp_prod, online_dev, online_prod, sandbox, all" >&2
+  echo "--role must be one of: management, platform, connectivity, identity, security, corp_dev, corp_prod, online_dev, online_prod, sandbox, all" >&2
+  exit 2
+fi
+
+if [[ "$EXECUTE" == true && "$ROLE" == "all" && "$ALLOW_NINE_ROLE_RUN" != true ]]; then
+  echo "Refusing the nine-role creation run without --allow-nine-role-run." >&2
+  echo "This account has only four remaining creation slots; use --role platform or create roles one at a time." >&2
   exit 2
 fi
 

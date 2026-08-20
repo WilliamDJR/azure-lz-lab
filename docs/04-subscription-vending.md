@@ -6,6 +6,32 @@ This lab separates Azure billing placement from ALZ governance placement. They a
 
 This chapter retains the enterprise multi-subscription route. If subscription creation returns `PurchaseNeedsReview`, do not substitute repeated IDs into the vending commands or keep retrying. Continue with the separate [single-subscription capability lab](05-single-subscription.md), then return here only if Azure later approves additional subscriptions.
 
+## Current account quota and the safe allocation
+
+Microsoft Support confirmed that this account has five historical subscription
+records: one Active and four Deleted. The Deleted records still count toward
+the account limit, so an increase to nine leaves **four creation slots**, not
+nine usable new subscriptions. A new subscription that is later deleted also
+continues to consume a slot according to the support response. Treat every
+creation as effectively permanent for quota planning.
+
+The quota-aware lab allocation is therefore:
+
+| Actual subscription | Logical use in this repository | Lifecycle rule |
+|---|---|---|
+| Existing Active Sponsorship | Protected workload/experiment subscription | Keep it; do not delete or move it without an explicit owner-approved inventory and change plan |
+| New 1 | Management | Create once, verify billing and cost attribution |
+| New 2 | Connectivity | Create once, verify billing and cost attribution |
+| New 3 | Identity | Create once; keep optional resources disabled |
+| New 4 | Security | Create once; keep Sentinel disabled unless approved |
+
+This gives four distinct platform subscriptions plus one existing workload
+subscription. The logical workload roles (`corp_dev`, `corp_prod`, `online_*`
+and `sandbox`) may reuse the protected subscription in the repository's
+`quota-limited` profile; they are not separate billing, policy or quota
+boundaries. The nine-role manifest remains a future/reference topology and is
+not executable against this account without another quota increase.
+
 ## Two independent hierarchies
 
 ```text
@@ -47,8 +73,8 @@ Separate development and production subscriptions give each environment an indep
 2. Confirm that the caller has the required invoice-section subscription-creation role and tenant permissions.
 3. Create only the `management` subscription first.
 4. Deploy a tiny eligible resource, wait for cost data, and confirm that charges reduce the intended sponsorship balance.
-5. Create the remaining role subscriptions only after that verification.
-6. Record subscription IDs in `terraform/subscriptions.tfvars`; never commit that file.
+5. Create `connectivity`, `identity` and `security` only after that verification; never create disposable workload subscriptions for this lab.
+6. Record the four new IDs plus the existing protected ID in `terraform/subscriptions.quota-limited.tfvars`; never commit that file.
 7. Apply governance once with subscription movement disabled, inspect the plan and hierarchy, then enable placement.
 
 The helper is a dry run by default:
@@ -65,11 +91,14 @@ export AZURE_BILLING_SCOPE='/providers/Microsoft.Billing/billingAccounts/<accoun
 # First subscription only
 ./scripts/create-subscriptions.sh --role management --execute
 
-# After cost attribution has been verified
-./scripts/create-subscriptions.sh --role all --execute
+# After cost attribution has been verified, create the remaining platform roles
+./scripts/create-subscriptions.sh --role platform --execute
 ```
 
-The all-role run reuses an existing alias and writes `terraform/subscriptions.tfvars` only when that file does not already exist. Review the generated IDs before any Terraform apply.
+The `platform` run selects only Management, Connectivity, Identity and Security.
+The historical nine-role `--role all` run is guarded and requires an explicit
+`--allow-nine-role-run`; do not use it for this account. Review every generated
+ID and its billing relationship before any Terraform apply.
 
 If the subscriptions already exist, do not run the creation helper. Copy `terraform/subscriptions.tfvars.example` to `terraform/subscriptions.tfvars` and enter the IDs manually.
 
@@ -86,7 +115,8 @@ A valid MCA Billing Profile and Invoice Section do not guarantee that the signed
 Until Azure permits another subscription, use one of these lab tracks:
 
 1. **Single-subscription learning track:** keep the existing sponsorship subscription, create the ALZ management-group hierarchy, optionally place the one subscription under a single reviewed branch, and separate logical platform/workload roles with resource groups and tags. Follow the complete [single-subscription capability lab](05-single-subscription.md). This is not an enterprise subscription-isolation boundary.
-2. **True multi-subscription track:** use an account/offer that is eligible to create additional subscriptions, or ask Microsoft to provision/clear the restriction. Only then create the management, connectivity, identity, security, and workload subscriptions and continue with the multi-subscription Terraform route. After cleaning the teaching deployment, continue with the [official Accelerator exercise](06-alz-accelerator.md).
+2. **Quota-limited transition track:** create at most the four platform subscriptions above, keep the existing Sponsorship subscription as the protected workload subscription, and use the repository's quota-limited manifest. This validates platform boundaries without spending quota on disposable workload subscriptions. After removing only the manual lab resources, continue with the [official Accelerator exercise](06-alz-accelerator.md) using the four new platform IDs; leave the protected workload subscription outside the Accelerator transition.
+3. **True nine-role track:** use an account/offer that is eligible to create enough additional subscriptions, or ask Microsoft to provision/clear the restriction. Only then use the nine-unique-ID Terraform reference topology.
 
 Do not repeatedly retry `--role all`; the helper now stops with an explicit explanation when Azure returns `PurchaseNeedsReview`.
 

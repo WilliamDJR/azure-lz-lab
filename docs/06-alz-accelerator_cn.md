@@ -18,6 +18,11 @@
 
 单订阅能力实验继续以手工 Terraform Root 为事实来源。采用受支持的 2/4 订阅 Accelerator 部署后，官方生成的仓库、流水线和 State 成为事实来源。绝不能让手工 Root 和 Accelerator 同时管理同一层级或资源。
 
+对当前账户而言，四订阅门槛对应四个新建的 Active 订阅，分别作为 Accelerator
+平台订阅。现有 Sponsorship 订阅中有组织资源，应作为受保护的工作负载/实验订阅。
+它不是 Accelerator 的平台输入，不能删除，也不能放入官方清理命令。仓库的
+quota-limited 手工 profile 可以在逻辑工作负载角色中复用它，但不会产生工作负载隔离。
+
 官方边界资料：[Accelerator 规划](https://azure.github.io/Azure-Landing-Zones/accelerator/0_planning/)、[平台订阅与权限](https://azure.github.io/Azure-Landing-Zones/accelerator/1_prerequisites/platform-subscriptions/)以及[管理组中的订阅移动](https://learn.microsoft.com/en-us/azure/governance/management-groups/manage)。
 
 ## 2. 任何受支持 Accelerator Apply 前的切换 Gate
@@ -25,15 +30,19 @@
 第 4 节的单订阅只读审阅只创建本地文件，不需要先切换。执行 2/4 订阅 Bootstrap/Apply 前：
 
 1. 完成手工治理、网络、DNS、Policy 和成本实验，并保存所需证据。
-2. 按当前手工路线执行清理。单订阅使用[其清理与迁移步骤](05-single-subscription_cn.md#10-清理与后续迁移)；多订阅教学路线运行：
+2. 按当前手工路线执行清理。单订阅使用[其清理与迁移步骤](05-single-subscription_cn.md#10-清理与后续迁移)；配额受限教学路线运行会显示 Plan 的资源级清理：
 
    ```bash
-   ./scripts/nuke-everything.sh --mode multi
+   ./scripts/nuke-everything.sh --mode quota-limited
    ```
 
-3. 确认教学资源、管理组 Association、Policy Assignment 和 Role Assignment 已删除。脚本会刻意保留 Bootstrap State Storage。
+   脚本只在显示 Destroy Plan 并确认后删除手工 Terraform State 中的资源，绝不删除订阅。
+   如果 Plan 中出现组织资源或资源组，应立即停止。历史九角色教学路线只有在九个
+   ID 确实可用且目标订阅获准清理时，才使用 `--mode multi`。
+
+3. 确认教学资源、管理组 Association、Policy Assignment 和 Role Assignment 已删除。脚本会刻意保留 Bootstrap State Storage 和受保护工作负载订阅。
 4. 归档手工 State 和 Plan 证据。不要把其 Backend 交给 Accelerator；切换后不要再运行这些手工 Root。
-5. 确认每个目标订阅处于 Active 状态、属于正确 Tenant，并且足够干净。双订阅路线要求不同的 Management/Connectivity ID；安全封装路线要求 4 个不同 ID。
+5. 确认四个平台订阅处于 Active 状态、属于正确 Tenant，并且足够干净；受保护工作负载订阅留在 Accelerator 迁移范围之外。双订阅路线要求不同的 Management/Connectivity ID；安全封装路线要求 4 个不同 ID。
 6. 从全新空目录开始 Accelerator。不要把相同资源同时导入两个 State。
 
 ## 3. 前置条件
@@ -243,7 +252,7 @@ Remove-PlatformLandingZone `
   -PlanMode
 ```
 
-4 订阅安全封装路线使用：
+4 订阅安全封装路线只传入四个新建的平台订阅：
 
 ```powershell
 Remove-PlatformLandingZone `
@@ -253,7 +262,7 @@ Remove-PlatformLandingZone `
   -PlanMode
 ```
 
-只有 Bootstrap 使用独立的第五个订阅时，才增加 `-AdditionalSubscriptions "<bootstrap-subscription-id>"`。检查 Subscription Target、移动和每项计划删除内容；只有预览正确时，才去掉 `-PlanMode` 再次运行。
+只有 Bootstrap 使用独立的第五个平台/Bootstrap 订阅时，才增加 `-AdditionalSubscriptions "<bootstrap-subscription-id>"`。绝不要传入受保护的现有工作负载订阅。检查 Subscription Target、移动和每项计划删除内容；只有预览正确时，才去掉 `-PlanMode` 再次运行。
 
 第二步，使用该次部署保存的完全相同配置和 Output 目录删除 Bootstrap/版本控制资源：
 

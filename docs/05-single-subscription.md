@@ -49,6 +49,43 @@ Management groups contain child management groups and subscriptions, not resourc
 
 Microsoft's current Accelerator planning guidance recommends four platform subscriptions and documents a two-subscription minimum for SMB scenarios. It does not document a one-subscription deployment topology. [Official planning guidance](https://azure.github.io/Azure-Landing-Zones/accelerator/0_planning/)
 
+## Quota-limited transition: four new platform subscriptions plus the protected workload
+
+The account review leaves four creation slots after the existing Active
+Sponsorship subscription and four historical Deleted records are counted. If
+all four slots are approved, use `subscriptions.quota-limited.tfvars.example`:
+
+- the four new IDs are distinct `management`, `connectivity`, `identity` and `security` subscriptions;
+- the existing Sponsorship ID is repeated only for the logical workload roles;
+- Terraform creates one actual Corp association for that workload ID, never five conflicting parent associations;
+- the existing workload subscription is never deleted, and its organization-owned resource groups and resources are never selected as lab targets.
+
+Prepare the three root files and the bootstrap file, then use a separate state key:
+
+```bash
+cp terraform/subscriptions.quota-limited.tfvars.example terraform/subscriptions.quota-limited.tfvars
+cp terraform/00-bootstrap/terraform.quota-limited.tfvars.example terraform/00-bootstrap/terraform.tfvars
+cp terraform/10-governance/terraform.quota-limited.tfvars.example terraform/10-governance/terraform.tfvars
+cp terraform/20-platform/terraform.quota-limited.tfvars.example terraform/20-platform/terraform.tfvars
+./scripts/init-backends.sh --mode quota-limited
+```
+
+Before any apply, inventory the existing Sponsorship subscription, confirm all
+four new subscriptions are Active and in the intended Billing Profile/Invoice
+Section, and run plans for both roots. Keep
+`move_subscriptions_into_hierarchy = false` unless the organization approves
+the workload subscription inheriting the experimental management-group Policy.
+In that reviewed change also set
+`allow_protected_workload_policy_inheritance = true`; Terraform rejects the
+move when the explicit acknowledgement is absent.
+The platform resources can be deployed to the four new platform subscriptions
+and to a dedicated, uniquely named lab resource group in the existing workload
+subscription without deleting or modifying unrelated resources.
+
+This route gives at most five Active subscriptions (four new plus the existing
+one), but it does not give five independent workload boundaries. Do not create
+or delete disposable workload subscriptions to simulate them.
+
 ## 2. Prerequisites and inventory before changing governance
 
 ### Tools, sign-in and authorization
@@ -437,6 +474,15 @@ Follow the [Azure Pipelines lab](../azure-devops/README.md). Set `ALLOW_SHARED_S
 
 The service connection needs access to only that subscription plus the state container and relevant management-group scopes. Keep the apply environment approval enabled and verify that the pipeline applies the published plan artifact rather than generating a new plan after approval.
 
+For the quota-limited profile, use the same template with
+`ALLOW_SHARED_SUBSCRIPTION_IDS=false`,
+`ALLOW_LOGICAL_WORKLOAD_SUBSCRIPTION_IDS=true`,
+`TF_BACKEND_KEY=20-platform-quota-limited.tfstate` (or the governance key),
+and the JSON from `subscriptions.quota-limited.tfvars`. The federated identity
+must have only the four platform subscriptions plus the protected workload
+subscription and state container. Do not grant the pipeline permission to
+delete subscriptions or to manage organization resource groups.
+
 After every stable stage, run another plan. Exit code `0` means no drift, `2` means changes, and `1` means an error:
 
 ```bash
@@ -513,12 +559,27 @@ az monitor diagnostic-settings subscription delete \
   --name '<lab-activity-log-diagnostic-setting-name>'
 ```
 
-Do not delete pre-existing organization diagnostic settings. Then remove hourly billed components and destroy the two single-mode roots:
+Do not delete pre-existing organization diagnostic settings. Then remove hourly billed components and destroy only the manual Terraform resources. For the single-subscription route use:
 
 ```bash
 ./scripts/destroy-expensive.sh
 ./scripts/nuke-everything.sh --mode single
 ```
+
+For the quota-limited route, use the matching manifest and state key:
+
+```bash
+./scripts/nuke-everything.sh --mode quota-limited
+```
+
+The script shows a separate destroy plan for Platform and Governance and asks
+for `apply-destroy` after each plan. The quota-limited cleanup never deletes a
+subscription and must not delete an organization-owned resource, diagnostic
+setting, lock or resource group. If a lab resource group contains an unrelated
+resource, stop and remove the lab resource from Terraform state or obtain an
+owner-approved resource-level plan; do not force-delete the group. Keep all
+five subscriptions for later official Accelerator use or normal organizational
+operations.
 
 The full teardown removes the managed association, but Azure does not promise to restore the subscription's previous parent. Verify the resulting parent and restore `ORIGINAL_MANAGEMENT_GROUP_ID` if required:
 
@@ -539,10 +600,9 @@ terraform -chdir=terraform/00-bootstrap apply destroy.tfplan
 
 Before migrating to multi-subscription or the official Accelerator:
 
-1. Destroy the single-subscription deployment using its original manifest and state.
-2. Verify that no lab resources, Policy assignments, associations or role assignments remain.
-3. Create a new multi-subscription manifest with unique IDs.
-4. Run `./scripts/init-backends.sh --mode multi` to select the separate multi-subscription state keys.
-5. Deploy the multi-subscription path or start the official Accelerator from a clean generated repository.
+1. Destroy only the manual lab resources using their original manifest and state; never delete the existing workload subscription.
+2. Verify that no lab resources, Policy assignments, associations or role assignments remain, while organization-owned settings remain intact.
+3. Keep the four platform subscriptions and start the official Accelerator from a clean generated repository, or create a nine-unique-ID manifest only after a future quota increase.
+4. Run `./scripts/init-backends.sh --mode multi` only when the nine-role manual route is genuinely approved and available.
 
 Do not replace the repeated IDs with unique IDs in the existing single-mode state. That can propose cross-subscription recreation and does not constitute an ALZ migration.

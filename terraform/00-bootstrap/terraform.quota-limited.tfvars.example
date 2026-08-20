@@ -1,0 +1,9 @@
+# Quota-limited profile. The state storage is created in the new Management
+# subscription, not in the protected existing workload subscription.
+
+management_subscription_id = "00000000-0000-0000-0000-000000000001"
+prefix                     = "alzquota"
+location                   = "australiaeast"
+
+# Keep public access available to Entra-authenticated callers initially.
+allowed_ip_cidrs = []

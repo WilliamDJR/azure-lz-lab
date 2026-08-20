@@ -26,13 +26,19 @@ open https://dev.azure.com          # A Microsoft account is sufficient
 # 3. Pipelines -> Library -> + Variable group
 #    Name it platform-common and add:
 #      TF_VERSION, TF_BACKEND_RESOURCE_GROUP, TF_BACKEND_STORAGE_ACCOUNT,
-#      TF_BACKEND_CONTAINER, TF_BACKEND_KEY, SUBSCRIPTION_IDS_JSON, and
-#      ALLOW_SHARED_SUBSCRIPTION_IDS.
+#      TF_BACKEND_CONTAINER, TF_BACKEND_KEY, SUBSCRIPTION_IDS_JSON,
+#      ALLOW_SHARED_SUBSCRIPTION_IDS, and
+#      ALLOW_LOGICAL_WORKLOAD_SUBSCRIPTION_IDS.
 #    SUBSCRIPTION_IDS_JSON is the JSON object matching terraform/subscriptions.tfvars.
 #    Use false for multi-subscription mode and true only for the documented
 #    single-subscription track.
+#    Set ALLOW_LOGICAL_WORKLOAD_SUBSCRIPTION_IDS=true only for the
+#    quota-limited profile (four distinct platform IDs plus one protected
+#    existing workload ID); otherwise keep it false.
 #    Single mode must use 10-governance-single.tfstate or
 #    20-platform-single.tfstate as appropriate.
+#    Quota-limited mode must use 10-governance-quota-limited.tfstate or
+#    20-platform-quota-limited.tfstate as appropriate.
 
 # 4. Pipelines -> Environments -> New environment
 #    Name it alz-lab -> Approvals and checks -> Approvals -> add yourself.

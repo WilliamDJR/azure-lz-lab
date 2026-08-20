@@ -20,10 +20,17 @@ move_subscriptions_into_hierarchy = false
 # Keep false for the enterprise multi-subscription topology. Set true only
 # when using subscriptions.single.tfvars for the documented fallback track.
 allow_shared_subscription_ids = false
+# Set true only with subscriptions.quota-limited.tfvars: four distinct
+# platform IDs plus one protected existing workload ID.
+allow_logical_workload_subscription_ids = false
 
 # Single-subscription track only: the one subscription can have only one
 # management-group parent. Corp is useful for the Policy inheritance exercise.
 single_subscription_management_group_key = "corp"
+
+# Quota-limited mode only: moving the protected workload subscription requires
+# an owner-approved inventory because its existing resources inherit Policy.
+allow_protected_workload_policy_inheritance = false
 
 # Start with Audit. Switch to Deny on day 3 and try to create a VM with a
 # public IP - seeing the deployment get rejected is the whole point.

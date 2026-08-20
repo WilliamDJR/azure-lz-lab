@@ -27,6 +27,18 @@ variable "allow_shared_subscription_ids" {
   default     = false
 }
 
+variable "allow_logical_workload_subscription_ids" {
+  description = "Permit the four platform roles to use distinct subscriptions while all logical workload roles reuse one existing protected subscription. This is a quota-limited transition profile, not full subscription isolation."
+  type        = bool
+  default     = false
+}
+
+variable "allow_protected_workload_policy_inheritance" {
+  description = "Explicitly acknowledge that the existing workload subscription may inherit this lab's management-group Policy and RBAC. Required before moving it in quota-limited mode because the subscription contains organization resources."
+  type        = bool
+  default     = false
+}
+
 variable "single_subscription_management_group_key" {
   description = "Management group that owns the one subscription in the single-subscription learning track. Changing it moves the whole subscription and every resource inside it."
   type        = string

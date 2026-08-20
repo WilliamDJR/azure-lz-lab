@@ -5,6 +5,14 @@ locals {
   subscription_budgets = var.budget_start_date == null ? {} : (
     var.allow_shared_subscription_ids
     ? { shared = var.subscription_ids.management }
+    : var.allow_logical_workload_subscription_ids
+    ? {
+      management   = var.subscription_ids.management
+      connectivity = var.subscription_ids.connectivity
+      identity     = var.subscription_ids.identity
+      security     = var.subscription_ids.security
+      workload     = var.subscription_ids.corp_dev
+    }
     : var.subscription_ids
   )
 }
@@ -20,7 +28,7 @@ resource "azurerm_consumption_budget_subscription" "role" {
   amount = var.allow_shared_subscription_ids ? (
     lookup(var.monthly_budget_overrides, "management", var.default_monthly_budget)
     ) : (
-    lookup(var.monthly_budget_overrides, each.key, var.default_monthly_budget)
+    lookup(var.monthly_budget_overrides, each.key, lookup(var.monthly_budget_overrides, each.key == "workload" ? "corp_dev" : each.key, var.default_monthly_budget))
   )
   time_grain = "Monthly"
 

@@ -18,6 +18,8 @@ if [[ -z "$SUBSCRIPTION_VAR_FILE" ]]; then
   deployment_mode=$($TF output -raw deployment_mode 2>/dev/null || true)
   if [[ "$deployment_mode" == "single-subscription" ]]; then
     SUBSCRIPTION_VAR_FILE="../subscriptions.single.tfvars"
+  elif [[ "$deployment_mode" == "quota-limited" ]]; then
+    SUBSCRIPTION_VAR_FILE="../subscriptions.quota-limited.tfvars"
   else
     SUBSCRIPTION_VAR_FILE="../subscriptions.tfvars"
   fi

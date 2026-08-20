@@ -131,7 +131,7 @@ ALZ 按**所有权和故障半径**组织资源，而不是按资源类型组织
 
 | # | 设计领域 | 核心问题 | 本实验覆盖 |
 |---|---|---|---|
-| 1 | **Azure 计费与 Entra 租户** | 租户和计费层级 | 多订阅路线：一个租户、一个 MCA Invoice Section 和九个角色订阅；单订阅路线：一个现有订阅和逻辑角色。参见 [04-subscription-vending_cn.md](04-subscription-vending_cn.md) 与 [05-single-subscription_cn.md](05-single-subscription_cn.md) |
+| 1 | **Azure 计费与 Entra 租户** | 租户和计费层级 | 多订阅参考路线：一个租户、一个 MCA Invoice Section 和九个角色订阅；当前配额受限路线：四个新平台订阅 + 一个受保护现有工作负载订阅；单订阅路线：一个现有订阅和逻辑角色。参见 [04-subscription-vending_cn.md](04-subscription-vending_cn.md) 与 [05-single-subscription_cn.md](05-single-subscription_cn.md) |
 | 2 | **身份与访问管理** | 谁能执行哪些操作，特权如何受控？ | Role Assignment 与 Managed Identity；PIM 作为概念扩展 |
 | 3 | **资源组织** | Management Group、Subscription、Resource Group、名称和标签如何分层？ | `10-governance` |
 | 4 | **网络拓扑与连接** | Hub-Spoke 或 Virtual WAN、出口和混合连接 | `20-platform`；参见 [02-networking_cn.md](02-networking_cn.md) |

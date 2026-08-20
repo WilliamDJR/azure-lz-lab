@@ -6,6 +6,28 @@
 
 本章保留企业多订阅路线。如果创建订阅返回 `PurchaseNeedsReview`，不要把重复 ID 填入自动交付命令，也不要持续重试。请转到独立的[单订阅能力实验](05-single-subscription_cn.md)；只有 Azure 后续批准额外订阅后，才返回本章继续。
 
+## 当前账户配额与安全分配
+
+Microsoft Support 已确认该账户共有五条历史订阅记录：一条 Active、四条
+Deleted。Deleted 记录仍计入账户上限，因此即使上限调整为 9，实际也只剩下
+**4 个创建名额**，而不是可以新建 9 个订阅。根据支持回复，新建后再删除的订阅
+也会继续占用名额。规划时应把每一次创建都视为基本不可回收的配额消耗。
+
+因此本实验采用以下配额受限分配：
+
+| 实际订阅 | 本仓库中的逻辑用途 | 生命周期规则 |
+|---|---|---|
+| 现有 Active Sponsorship | 受保护的工作负载/实验订阅 | 保留；没有经过负责人批准的盘点和变更计划，不删除、不移动 |
+| 新建 1 | Management | 只创建一次，验证计费和额度归属 |
+| 新建 2 | Connectivity | 只创建一次，验证计费和额度归属 |
+| 新建 3 | Identity | 只创建一次；保持可选资源关闭 |
+| 新建 4 | Security | 只创建一次；未经批准保持 Sentinel 关闭 |
+
+这会得到四个互相独立的平台订阅，加上一个现有工作负载订阅。仓库的
+`quota-limited` profile 可以让逻辑工作负载角色（`corp_dev`、`corp_prod`、
+`online_*`、`sandbox`）复用受保护订阅；它们不构成独立的计费、Policy 或配额
+边界。九角色清单保留为未来/参考拓扑，在没有新的配额批准前不可执行。
+
 ## 两套彼此独立的层级
 
 ```text
@@ -47,8 +69,8 @@ Billing Account                           Tenant Root Group
 2. 确认执行人具备 Invoice Section 级订阅创建角色及所需租户权限。
 3. 先只创建 `management` 订阅。
 4. 部署一个很小且符合额度条件的资源，等待成本数据出现，确认费用扣减了预期的赞助余额。
-5. 验证成功后再创建其余角色订阅。
-6. 把订阅 ID 记录在 `terraform/subscriptions.tfvars` 中，绝不要提交该文件。
+5. 验证成功后再创建 `connectivity`、`identity` 和 `security`；不要为本实验创建可丢弃的工作负载订阅。
+6. 把四个新 ID 与现有受保护 ID 记录在 `terraform/subscriptions.quota-limited.tfvars` 中，绝不要提交该文件。
 7. 第一次部署治理层时关闭订阅移动；检查计划和层级后，再启用订阅归位。
 
 辅助脚本默认只预览：
@@ -65,11 +87,13 @@ export AZURE_BILLING_SCOPE='/providers/Microsoft.Billing/billingAccounts/<accoun
 # 先只创建一个订阅
 ./scripts/create-subscriptions.sh --role management --execute
 
-# 验证成本归属后再创建全部角色订阅
-./scripts/create-subscriptions.sh --role all --execute
+# 验证成本归属后只创建四个平台订阅
+./scripts/create-subscriptions.sh --role platform --execute
 ```
 
-全量运行会复用已有 alias，并且只会在 `terraform/subscriptions.tfvars` 不存在时写入该文件。执行任何 Terraform apply 前都要检查生成的 ID。
+`platform` 只选择 Management、Connectivity、Identity 和 Security。历史上的九角色
+`--role all` 现在受到保护，必须显式传入 `--allow-nine-role-run`；当前账户不要使用。
+在任何 Terraform apply 前，都要逐一检查生成的 ID 和计费归属。
 
 如果订阅已经存在，不要运行创建脚本。把 `terraform/subscriptions.tfvars.example` 复制为 `terraform/subscriptions.tfvars`，然后手工填写 ID。
 
@@ -86,7 +110,8 @@ export AZURE_BILLING_SCOPE='/providers/Microsoft.Billing/billingAccounts/<accoun
 在 Azure 允许创建第二个订阅之前，可以选择以下实验路线：
 
 1. **单订阅学习路线：** 保留现有 Sponsorship 订阅，创建 ALZ 管理组层级，把唯一订阅按需放入一个经过审查的分支，并通过资源组和标签区分逻辑平台/工作负载角色。按照完整的[单订阅能力实验](05-single-subscription_cn.md)执行。它不具备企业级订阅隔离边界。
-2. **真实多订阅路线：** 使用明确允许创建额外订阅的账户/Offer，或者请 Microsoft 清除或代为 provision 该限制。只有成功后，才创建 management、connectivity、identity、security 和 workload 订阅，继续多订阅 Terraform 路线。清理教学部署后，再进入[官方 Accelerator 实验](06-alz-accelerator_cn.md)。
+2. **配额受限过渡路线：** 最多创建上面的四个平台订阅，保留现有 Sponsorship 订阅作为受保护工作负载订阅，并使用仓库的 quota-limited 清单。这样无需把配额花在可丢弃的工作负载订阅上，也可以验证平台边界。只清理手工实验资源后，使用四个新平台 ID 进入[官方 Accelerator 实验](06-alz-accelerator_cn.md)；受保护工作负载订阅不纳入 Accelerator 迁移。
+3. **完整九角色路线：** 使用明确允许创建足够多额外订阅的账户/Offer，或请 Microsoft provision/解除限制。只有这样才使用九个唯一 ID 的 Terraform 参考拓扑。
 
 不要反复重试 `--role all`；脚本现在检测到 `PurchaseNeedsReview` 时会直接停止并给出说明。
 

@@ -12,9 +12,14 @@
 |---|---|---|
 | 只有一个现有订阅 | [单订阅能力实验](docs/05-single-subscription_cn.md) | 部署手工 Terraform，以逻辑角色资源组实践治理、Policy、网络、可观测性和交付，但不宣称具备订阅隔离 |
 | 两个订阅 | 官方 Accelerator SMB 场景：Management + Connectivity | 使用官方向导，不使用仓库中要求四订阅的 Wrapper；提前规划后续 Identity 和 Security 订阅 |
+| 现有 Active 订阅 + 最多四个新订阅 | 下面的配额受限过渡路线，然后进入[完整 Accelerator 实验](docs/06-alz-accelerator_cn.md) | 复用现有订阅作为受保护工作负载/实验边界，四个新订阅只用于 Management、Connectivity、Identity 和 Security |
 | 4 个专用平台订阅及额外工作负载订阅 | 下面的多订阅路线，然后进入[完整 Accelerator 实验](docs/06-alz-accelerator_cn.md) | 验证企业订阅归位、跨订阅权限和平台/工作负载边界；下方手工拓扑需要 9 个唯一角色 ID。 |
 
 官方 Accelerator 当前推荐四个平台订阅，SMB 最低模型为两个。单订阅由本仓库的手工能力实验支持，不属于官方 Accelerator 部署拓扑。[官方规划指南](https://azure.github.io/Azure-Landing-Zones/accelerator/0_planning/)
+
+Microsoft Support 已确认该账户的四条历史 Deleted 记录仍计入订阅上限。即使上限
+调整为 9，实际也只剩四个创建名额；新建后删除订阅也不会返还名额。现有 Active
+Sponsorship 订阅必须受保护，不能删除，也不能当作可丢弃的实验配额。
 
 多订阅目标不是完整生产级 ALZ，但边界按照真实企业方式设计：计费层级与治理层级分离；平台能力使用独立订阅；开发和生产工作负载分订阅；Terraform 使用远程状态；所有 Azure CLI 操作都显式指定订阅。
 
@@ -80,6 +85,8 @@ terraform/
   subscriptions.tfvars.example   角色到订阅的共享清单
   subscriptions.single.tfvars.example
                                   单订阅角色清单
+  subscriptions.quota-limited.tfvars.example
+                                  四个平台 ID + 受保护工作负载 ID
   00-bootstrap/                   受保护的远程状态存储
   10-governance/                  管理组、Policy、RBAC、预算
   20-platform/                    跨角色订阅部署的平台资源
@@ -113,9 +120,47 @@ scripts/
 - 解释为什么 DINE 同时需要托管身份与 RBAC。
 - 识别持续收费资源，并明确何时删除它们。
 
+# 第二部分 Q：配额受限的平台路线
+
+当账户只剩四个创建名额，而现有 Sponsorship 订阅包含组织资源时，四个新订阅只
+用于平台角色，现有订阅保留为受保护的工作负载/实验订阅。这是在不把不可回收
+配额花在可丢弃工作负载订阅上的最大有效扩展。
+
+```bash
+cp terraform/subscriptions.quota-limited.tfvars.example terraform/subscriptions.quota-limited.tfvars
+cp terraform/00-bootstrap/terraform.quota-limited.tfvars.example terraform/00-bootstrap/terraform.tfvars
+cp terraform/10-governance/terraform.quota-limited.tfvars.example terraform/10-governance/terraform.tfvars
+cp terraform/20-platform/terraform.quota-limited.tfvars.example terraform/20-platform/terraform.tfvars
+./scripts/init-backends.sh --mode quota-limited
+```
+
+确认四个新订阅均为 Active，并属于预期 Billing Profile 与 Invoice Section 后，才替换
+五个占位符。现有 Sponsorship 订阅的负责人批准继承管理组 Policy 之前，保持
+`move_subscriptions_into_hierarchy = false`。两个 Root 都先执行 Plan，审查目标订阅
+和资源组，再 Apply 低成本基线。实验资源组使用唯一名称并带有 `lab=true` 标签；
+不要把组织资源组作为目标。只有负责人批准继承 Policy 后，才在 Governance 配置中
+将 `allow_protected_workload_policy_inheritance = true` 与移动操作放在同一次审查变更中；
+否则 Terraform 会拒绝移动。
+
+这条路线包含四个独立平台订阅和一个现有工作负载订阅。工作负载角色只是逻辑标签，
+治理 Root 对重复的工作负载 ID 最多创建一个 Corp 父 Association。四个新平台 ID
+用于官方 Accelerator；受保护工作负载订阅留在 Accelerator 平台输入和清理范围之外。
+
+每次会话结束先关闭收费功能，再使用匹配的 State 清理并审查 Destroy Plan：
+
+```bash
+./scripts/destroy-expensive.sh
+./scripts/nuke-everything.sh --mode quota-limited
+```
+
+脚本只删除手工 Terraform State 记录的资源，绝不删除订阅。如果 Destroy Plan 出现
+组织资源、Diagnostic Setting、Lock 或资源组，应立即停止。
+
 # 第二部分：多订阅部署与验证
 
-以下步骤要求 9 个角色订阅 ID 全部唯一。如果只有一个订阅，请改为按照[第 05 部分](docs/05-single-subscription_cn.md)执行；其中包含独立 Manifest、Backend Key、安全闸门和验证顺序。
+以下步骤是九角色参考路线，要求 9 个角色订阅 ID 全部唯一，不是当前配额受限默认路线。
+如果只有一个订阅，请按照[第 05 部分](docs/05-single-subscription_cn.md)执行；如果
+还有四个创建名额，请使用上面的第二部分 Q。
 
 ## 0. 前置条件与安全边界
 

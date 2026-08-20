@@ -1,0 +1,30 @@
+# Root-specific settings for the quota-limited profile.
+# Subscription IDs are supplied through ../subscriptions.quota-limited.tfvars.
+
+prefix            = "alzquota"
+root_display_name = "ALZ Quota-Limited Lab"
+
+allow_shared_subscription_ids           = false
+allow_logical_workload_subscription_ids = true
+
+# Safe default: create and inspect the hierarchy, but do not move the
+# existing organizational subscription until its owner approves inheritance.
+move_subscriptions_into_hierarchy  = false
+allow_protected_workload_policy_inheritance = false
+enforce_allowed_locations_policy    = false
+public_ip_policy_effect             = "Audit"
+
+# Optional after the Management workspace exists:
+# log_analytics_workspace_id = "/subscriptions/.../resourceGroups/.../providers/Microsoft.OperationalInsights/workspaces/..."
+
+# Four platform budgets plus one workload budget, if approved:
+# budget_start_date      = "2026-08-01T00:00:00Z"
+# default_monthly_budget = 25
+# monthly_budget_overrides = {
+#   management   = 25
+#   connectivity = 25
+#   identity     = 10
+#   security     = 10
+#   workload     = 25
+# }
+# budget_contact_emails = ["cloud-operations@example.com"]

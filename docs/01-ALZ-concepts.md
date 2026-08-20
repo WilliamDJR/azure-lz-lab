@@ -131,7 +131,7 @@ Examples:
 
 | # | Design area | Core question | This lab |
 |---|---|---|---|
-| 1 | **Azure billing and Entra tenant** | Tenant and billing hierarchy | Multi-subscription route: one tenant, one MCA invoice section and nine role subscriptions. Single-subscription route: one existing subscription with logical roles. See [04-subscription-vending.md](04-subscription-vending.md) and [05-single-subscription.md](05-single-subscription.md) |
+| 1 | **Azure billing and Entra tenant** | Tenant and billing hierarchy | Reference multi-subscription route: one tenant, one MCA invoice section and nine role subscriptions. Current quota-limited route: four new platform subscriptions plus one protected existing workload subscription. Single-subscription route: one existing subscription with logical roles. See [04-subscription-vending.md](04-subscription-vending.md) and [05-single-subscription.md](05-single-subscription.md) |
 | 2 | **Identity and access management** | Who can do what, and how is privilege controlled? | Role assignments and managed identities; PIM is conceptual |
 | 3 | **Resource organization** | How are management groups, subscriptions, resource groups, names, and tags structured? | `10-governance` |
 | 4 | **Network topology and connectivity** | Hub-Spoke or Virtual WAN, egress, and hybrid connectivity | `20-platform`; see [02-networking.md](02-networking.md) |

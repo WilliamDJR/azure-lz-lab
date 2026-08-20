@@ -1,0 +1,25 @@
+# Quota-limited transition profile.
+#
+# Azure has already counted historical Deleted subscriptions against this
+# account's limit. The account can create at most four more subscriptions, so
+# use those four for platform boundaries and keep the existing Sponsorship
+# subscription as the protected workload/experiment subscription.
+#
+# Replace the five placeholders with real ACTIVE subscription IDs. The first
+# four must be distinct from one another; every workload role must repeat the
+# existing workload ID. Never delete the existing workload subscription.
+
+allow_shared_subscription_ids          = false
+allow_logical_workload_subscription_ids = true
+
+subscription_ids = {
+  management   = "00000000-0000-0000-0000-000000000001" # new platform sub 1
+  connectivity = "00000000-0000-0000-0000-000000000002" # new platform sub 2
+  identity     = "00000000-0000-0000-0000-000000000003" # new platform sub 3
+  security     = "00000000-0000-0000-0000-000000000004" # new platform sub 4
+  corp_dev     = "00000000-0000-0000-0000-000000000005" # existing Sponsorship sub
+  corp_prod    = "00000000-0000-0000-0000-000000000005"
+  online_dev   = "00000000-0000-0000-0000-000000000005"
+  online_prod  = "00000000-0000-0000-0000-000000000005"
+  sandbox      = "00000000-0000-0000-0000-000000000005"
+}

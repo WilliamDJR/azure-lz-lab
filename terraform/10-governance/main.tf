@@ -141,14 +141,40 @@ locals {
     online        = azurerm_management_group.online.id
     sandbox       = azurerm_management_group.sandbox.id
   }
+
+  # Quota-limited profile: four newly created platform subscriptions plus the
+  # existing protected subscription reused for all logical workload roles.
+  # Each actual subscription still receives at most one parent management
+  # group. The workload subscription is represented by one Corp association;
+  # corp/online/sandbox remain logical roles inside that subscription.
+  quota_limited_subscription_management_group_ids = {
+    management   = azurerm_management_group.platform_management.id
+    connectivity = azurerm_management_group.platform_connectivity.id
+    identity     = azurerm_management_group.platform_identity.id
+    security     = azurerm_management_group.platform_security.id
+    workload     = azurerm_management_group.corp.id
+  }
+
+  quota_limited_subscription_targets = {
+    management   = var.subscription_ids.management
+    connectivity = var.subscription_ids.connectivity
+    identity     = var.subscription_ids.identity
+    security     = var.subscription_ids.security
+    workload     = var.subscription_ids.corp_dev
+  }
 }
 
 resource "azurerm_management_group_subscription_association" "role" {
   # A subscription can have only one management-group parent. Shared IDs are
   # handled by the single association below, never by nine role associations.
-  for_each = var.move_subscriptions_into_hierarchy && !var.allow_shared_subscription_ids ? var.subscription_ids : {}
+  # Quota-limited workload roles are deduplicated to one Corp target.
+  for_each = var.move_subscriptions_into_hierarchy && !var.allow_shared_subscription_ids ? (
+    var.allow_logical_workload_subscription_ids
+    ? local.quota_limited_subscription_targets
+    : var.subscription_ids
+  ) : {}
 
-  management_group_id = local.subscription_management_group_ids[each.key]
+  management_group_id = var.allow_logical_workload_subscription_ids ? local.quota_limited_subscription_management_group_ids[each.key] : local.subscription_management_group_ids[each.key]
   subscription_id     = "/subscriptions/${each.value}"
 }
 

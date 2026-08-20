@@ -10,10 +10,11 @@ MODE="multi"
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/init-backends.sh [--mode multi|single]
+Usage: ./scripts/init-backends.sh [--mode multi|single|quota-limited]
 
-The modes use different backend keys so a single-subscription deployment is
-never silently repointed at the multi-subscription Terraform state.
+The modes use different backend keys so single-subscription and
+quota-limited deployments are never silently repointed at the nine-role
+multi-subscription Terraform state.
 EOF
 }
 
@@ -21,7 +22,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
-        echo "--mode requires multi or single" >&2
+        echo "--mode requires multi, single or quota-limited" >&2
         exit 2
       fi
       MODE="$2"
@@ -35,7 +36,8 @@ done
 case "$MODE" in
   multi) STATE_SUFFIX="" ;;
   single) STATE_SUFFIX="-single" ;;
-  *) echo "--mode must be multi or single" >&2; exit 2 ;;
+  quota-limited) STATE_SUFFIX="-quota-limited" ;;
+  *) echo "--mode must be multi, single or quota-limited" >&2; exit 2 ;;
 esac
 
 resource_group=$($TF -chdir="$BOOTSTRAP" output -raw state_resource_group_name)

@@ -49,6 +49,37 @@ Tenant Root Group
 
 Microsoft 当前 Accelerator 规划指南推荐四个平台订阅，并为 SMB 场景说明了两个订阅的最低模型；官方没有记录单订阅部署拓扑。[官方规划指南](https://azure.github.io/Azure-Landing-Zones/accelerator/0_planning/)
 
+## 配额受限过渡：四个新平台订阅 + 受保护工作负载订阅
+
+账户审核在现有 Active Sponsorship 订阅和四条历史 Deleted 记录之外，只剩四个
+创建名额。如果四个名额都获批，请使用 `subscriptions.quota-limited.tfvars.example`：
+
+- 四个新 ID 分别用于互不相同的 `management`、`connectivity`、`identity` 和 `security` 订阅；
+- 现有 Sponsorship ID 只在逻辑工作负载角色中复用；
+- Terraform 只为这个工作负载 ID 创建一个真实的 Corp Association，不会创建五个冲突的父级 Association；
+- 现有工作负载订阅绝不删除，也绝不把组织资源组和资源当作实验目标。
+
+准备三个 Root 文件和 Bootstrap 文件，并使用独立 State Key：
+
+```bash
+cp terraform/subscriptions.quota-limited.tfvars.example terraform/subscriptions.quota-limited.tfvars
+cp terraform/00-bootstrap/terraform.quota-limited.tfvars.example terraform/00-bootstrap/terraform.tfvars
+cp terraform/10-governance/terraform.quota-limited.tfvars.example terraform/10-governance/terraform.tfvars
+cp terraform/20-platform/terraform.quota-limited.tfvars.example terraform/20-platform/terraform.tfvars
+./scripts/init-backends.sh --mode quota-limited
+```
+
+任何 Apply 前，先盘点现有 Sponsorship 订阅，确认四个新订阅均为 Active，且属于
+预期 Billing Profile/Invoice Section，并分别审查两个 Root 的 Plan。除非组织明确
+批准工作负载订阅继承实验管理组 Policy，否则保持
+`move_subscriptions_into_hierarchy = false`。在经过审查的移动变更中，同时设置
+`allow_protected_workload_policy_inheritance = true`；没有显式确认时 Terraform 会拒绝移动。
+平台资源可以部署到四个平台订阅，
+以及现有工作负载订阅中一个唯一命名的实验资源组；不得删除或修改无关资源。
+
+这条路线最多得到五个 Active 订阅（四个新建 + 一个现有），但并不等于五个独立
+的工作负载边界。不要为了模拟它们创建或删除可丢弃的工作负载订阅。
+
 ## 2. 修改治理前的前置条件与订阅盘点
 
 ### 工具、登录与授权
@@ -437,6 +468,14 @@ az network vpn-connection list \
 
 Service Connection 只需访问这一个订阅、State Container 和相关管理组 Scope。保留 Apply Environment 审批，并确认 Pipeline Apply 的是已发布的 Plan Artifact，而不是在审批后重新生成 Plan。
 
+配额受限 profile 使用相同模板，但设置
+`ALLOW_SHARED_SUBSCRIPTION_IDS=false`、
+`ALLOW_LOGICAL_WORKLOAD_SUBSCRIPTION_IDS=true`，Platform 使用
+`20-platform-quota-limited.tfstate`（Governance 使用对应的 State Key），并填入
+`subscriptions.quota-limited.tfvars` 中的 JSON。联邦身份只需要四个平台订阅、
+受保护工作负载订阅和 State Container 的权限；不要授予 Pipeline 删除订阅或管理
+组织资源组的权限。
+
 每个稳定阶段后再次运行 Plan。退出码 `0` 表示无漂移，`2` 表示有变更，`1` 表示错误：
 
 ```bash
@@ -513,12 +552,24 @@ az monitor diagnostic-settings subscription delete \
   --name '<lab-activity-log-diagnostic-setting-name>'
 ```
 
-不要删除组织原有的 Diagnostic Setting。随后先删除按小时收费的组件，再销毁两个单订阅 Root：
+不要删除组织原有的 Diagnostic Setting。随后先删除按小时收费的组件，再只销毁手工 Terraform 管理的资源。单订阅路线使用：
 
 ```bash
 ./scripts/destroy-expensive.sh
 ./scripts/nuke-everything.sh --mode single
 ```
+
+配额受限路线使用匹配的 Manifest 和 State Key：
+
+```bash
+./scripts/nuke-everything.sh --mode quota-limited
+```
+
+脚本会分别显示 Platform 和 Governance 的 Destroy Plan，并在每个 Plan 后要求输入
+`apply-destroy`。配额受限清理不会删除订阅，也不得删除组织资源、Diagnostic
+Setting、Lock 或 Resource Group。如果实验资源组中出现无关资源，应停止操作，从
+Terraform State 中移除实验资源或取得负责人批准的资源级方案；不要强制删除资源组。
+五个订阅都应保留，以便后续使用官方 Accelerator 或组织日常运行。
 
 完整清理会删除受管 Association，但 Azure 不保证恢复订阅原来的父管理组。检查实际父级，并按需恢复 `ORIGINAL_MANAGEMENT_GROUP_ID`：
 
@@ -539,10 +590,9 @@ terraform -chdir=terraform/00-bootstrap apply destroy.tfplan
 
 迁移到多订阅或官方 Accelerator 前：
 
-1. 使用原单订阅 Manifest 和 State 销毁单订阅部署。
-2. 确认没有遗留实验资源、Policy Assignment、Association 或 Role Assignment。
-3. 使用唯一订阅 ID 创建新的多订阅 Manifest。
-4. 运行 `./scripts/init-backends.sh --mode multi`，选择独立的多订阅 State Key。
-5. 部署多订阅路线，或者从全新的生成仓库开始官方 Accelerator。
+1. 使用原 Manifest 和 State 只销毁手工实验资源；绝不删除现有工作负载订阅。
+2. 确认没有遗留实验资源、Policy Assignment、Association 或 Role Assignment，同时组织原有设置保持完整。
+3. 保留四个平台订阅，从全新的生成仓库开始官方 Accelerator；只有未来获得配额后才创建九个唯一 ID 的 Manifest。
+4. 只有确实批准并具备九个唯一订阅时，才运行 `./scripts/init-backends.sh --mode multi`。
 
 不要在现有单订阅 State 中把重复 ID 直接替换成唯一 ID。这可能触发跨订阅重建，并不构成 ALZ 迁移。

@@ -4,6 +4,11 @@
 
 本章说明 `terraform/20-platform/` 使用的网络机制：Hub-Spoke、有效路由、Azure Firewall、VPN/ExpressRoute Gateway Transit、Private Endpoint 和 Private DNS。仓库的两条路线都能验证相同的报文与 DNS 行为。在单订阅路线中，Provider Alias 指向同一个订阅，资源组也只是逻辑边界，不能模拟跨订阅访问控制和故障隔离。
 
+配额受限路线中，四个平台 Alias 指向四个新订阅，工作负载 Alias 指向受保护的现有
+订阅。因此仍可以端到端验证 Hub、Private DNS 和工作负载资源组，但重复的工作负载
+角色不会产生独立的网络或故障域。使用配额受限 Manifest 和 Backend Key；不要与
+九角色或单订阅 State 混用。
+
 ## 1. 为什么使用 Hub-Spoke
 
 Azure VNet 是彼此独立的网络对象。VNet Peering 可以连接两个 VNet，但 Peering 不具备传递性：

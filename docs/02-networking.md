@@ -4,6 +4,13 @@
 
 This chapter explains the network mechanisms used by `terraform/20-platform/`: Hub-Spoke topology, effective routes, Azure Firewall, VPN/ExpressRoute gateway transit, Private Endpoint and Private DNS. The same packet and DNS behavior can be tested in both repository tracks. In the single-subscription track, provider aliases point to one subscription and resource groups are only logical boundaries; they do not reproduce cross-subscription access or failure isolation.
 
+In the quota-limited track, the four platform aliases point to four new
+subscriptions while the workload aliases point to the protected existing
+subscription. The hub, private DNS and workload resource groups can therefore
+be tested end to end, but the repeated workload roles do not create separate
+network or failure domains. Use the quota-limited manifest and backend key;
+never mix it with the nine-role or single-subscription state.
+
 ## 1. Why Azure uses Hub-Spoke
 
 Azure VNets are independent network objects. VNet peering connects two VNets, but peering is non-transitive:

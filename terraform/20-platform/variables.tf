@@ -31,6 +31,12 @@ variable "allow_shared_subscription_ids" {
   default     = false
 }
 
+variable "allow_logical_workload_subscription_ids" {
+  description = "Permit four distinct platform subscriptions while the logical workload roles reuse one existing protected subscription. This is a quota-limited transition profile, not full subscription isolation."
+  type        = bool
+  default     = false
+}
+
 variable "prefix" {
   description = "Short prefix used in every resource name."
   type        = string
